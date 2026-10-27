@@ -8,6 +8,7 @@ const MIN_GAP = 40; // min gap between boxes
 const SELF_W = 40;
 const ACT_W = 10;
 const MARGIN = 24;
+const MIN_LIFELINE = 20;
 
 export interface LParticipant {
   id: string;
@@ -129,6 +130,11 @@ export function layoutDiagram(doc: Doc, overrides: LayoutOverrides, measure: Mea
 
   const centers: number[] = [];
   ps.forEach((_, i) => centers.push(i === 0 ? widths[0] / 2 : centers[i - 1] + dist[i]));
+  // Dragged participants keep their spot
+  ps.forEach((p, i) => {
+    const x = overrides.participants[p.id]?.x;
+    if (x !== undefined) centers[i] = x;
+  });
   const center = (id: string) => centers[idx.get(id)!];
 
   // Axis Y: statements
@@ -258,10 +264,14 @@ export function layoutDiagram(doc: Doc, overrides: LayoutOverrides, measure: Mea
   const lifelineBottom = y + 10;
   for (const [id, stack] of active) while (stack.length) deactivate(id, lifelineBottom - 10);
 
-  const participants: LParticipant[] = ps.map((p, i) => ({
-    id: p.id, label: p.label, kind: p.kind, index: i,
-    x: centers[i], width: widths[i], height: heights[i], top, bottom: lifelineBottom,
-  }));
+  const participants: LParticipant[] = ps.map((p, i) => {
+    const o = overrides.participants[p.id];
+    const bottom = participantBottom(lifelineBottom + (o?.stretch ?? 0), heights[i], o?.y ?? top);
+    return {
+      id: p.id, label: p.label, kind: p.kind, index: i,
+      x: centers[i], width: widths[i], height: heights[i], top: participantTop(bottom, heights[i], o?.y ?? top), bottom,
+    };
+  });
 
   // Bounds
   let minX = Infinity, maxX = -Infinity;
@@ -277,11 +287,40 @@ export function layoutDiagram(doc: Doc, overrides: LayoutOverrides, measure: Mea
     grow(mid - half, mid + half);
   });
   if (!isFinite(minX)) [minX, maxX] = [0, 200];
-  const footer = Math.max(0, ...heights);
-  const bounds = { x: minX - MARGIN, y: -MARGIN, width: maxX - minX + MARGIN * 2, height: lifelineBottom + footer + MARGIN * 2 };
+  const minY = Math.min(0, ...participants.map((p) => p.top));
+  const maxY = Math.max(lifelineBottom, ...participants.map((p) => p.bottom + p.height));
+  const bounds = { x: minX - MARGIN, y: minY - MARGIN, width: maxX - minX + MARGIN * 2, height: maxY - minY + MARGIN * 2 };
   const title = doc.title ? { text: doc.title, x: (minX + maxX) / 2, y: 20 } : undefined;
 
-  return { participants, messages, notes, frames, activations, slots, title, lifelineTop: top + headerH, lifelineBottom, bounds };
+  const out = { participants, messages, notes, frames, activations, slots, title, lifelineTop: top + headerH, lifelineBottom, bounds };
+  return overrides.origin ? shiftLayout(out, overrides.origin.x, overrides.origin.y) : out;
+}
+
+// Move the whole layout
+export function shiftLayout(L: Layout, dx: number, dy: number): Layout {
+  if (!dx && !dy) return L;
+  return {
+    participants: L.participants.map((p) => ({ ...p, x: p.x + dx, top: p.top + dy, bottom: p.bottom + dy })),
+    messages: L.messages.map((m) => ({ ...m, x1: m.x1 + dx, x2: m.x2 + dx, y: m.y + dy, textY: m.textY + dy })),
+    notes: L.notes.map((n) => ({ ...n, x: n.x + dx, y: n.y + dy })),
+    frames: L.frames.map((f) => ({ ...f, x1: f.x1 + dx, x2: f.x2 + dx, y1: f.y1 + dy, y2: f.y2 + dy, sections: f.sections.map((q) => ({ ...q, y: q.y + dy })) })),
+    activations: L.activations.map((a) => ({ ...a, x: a.x + dx, y1: a.y1 + dy, y2: a.y2 + dy })),
+    slots: L.slots.map((q) => ({ ...q, y1: q.y1 + dy, y2: q.y2 + dy })),
+    title: L.title && { ...L.title, x: L.title.x + dx, y: L.title.y + dy },
+    lifelineTop: L.lifelineTop + dy,
+    lifelineBottom: L.lifelineBottom + dy,
+    bounds: { ...L.bounds, x: L.bounds.x + dx, y: L.bounds.y + dy },
+  };
+}
+
+// Footer top (kept below the header)
+export function participantBottom(bottom: number, height: number, top: number): number {
+  return Math.max(bottom, top + height + MIN_LIFELINE);
+}
+
+// Header top (kept above the footer)
+export function participantTop(lifelineBottom: number, height: number, top: number): number {
+  return Math.min(top, lifelineBottom - height - 10);
 }
 
 function noteWidth(lines: string[], measure: Measure) {
@@ -299,17 +338,4 @@ export function nearestParticipant(layout: Layout, x: number): LParticipant | un
   let best: LParticipant | undefined;
   for (const p of layout.participants) if (!best || Math.abs(p.x - x) < Math.abs(best.x - x)) best = p;
   return best;
-}
-
-// Dragged participant x, kept clear of its neighbours (unless it passes one: reorder)
-export function clampParticipantX(layout: Layout, id: string, x: number): number {
-  const ps = layout.participants;
-  const i = ps.findIndex((p) => p.id === id);
-  if (i < 0) return x;
-  const cur = ps[i];
-  const prev = ps[i - 1];
-  const next = ps[i + 1];
-  if (prev && x > prev.x) x = Math.max(x, prev.x + prev.width / 2 + cur.width / 2 + MIN_GAP);
-  if (next && x < next.x) x = Math.min(x, next.x - next.width / 2 - cur.width / 2 - MIN_GAP);
-  return x;
 }

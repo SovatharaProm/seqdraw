@@ -100,7 +100,10 @@ type NodeSide = 'top' | 'right' | 'bottom' | 'left';
 
 // Layout overrides (saved in .seqd, not in code)
 export interface LayoutOverrides {
-  participants: Record<string, { width?: number; height?: number; gap?: number }>;
+  // Sequence diagram offset on the board
+  origin?: { x: number; y: number };
+  // x: center, y: top (free drag), stretch: extra lifeline length
+  participants: Record<string, { width?: number; height?: number; gap?: number; x?: number; y?: number; stretch?: number }>;
   // Flowchart node positions (centers)
   nodes?: Record<string, { x: number; y: number }>;
   // Flowchart links by edge key

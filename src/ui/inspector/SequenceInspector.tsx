@@ -31,6 +31,7 @@ function ParticipantPanel({ selection, id }: { selection: Selection; id: string 
       </Field>
       <SelectField label="Shape" value={p.kind} options={SHAPES} onChange={(k) => actions.changeParticipantKind(id, k)} />
       {(ov?.width || ov?.height || ov?.gap !== undefined) && <LinkButton onClick={() => actions.resetParticipantSize(id)}>Reset size</LinkButton>}
+      {(ov?.gap !== undefined || ov?.x !== undefined || ov?.y !== undefined || ov?.stretch !== undefined) && <LinkButton onClick={() => actions.resetParticipantPosition(id)}>Reset position</LinkButton>}
     </InspectorPanel>
   );
 }

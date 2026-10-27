@@ -17,7 +17,7 @@ import { GroupOutline, MarqueeBox } from './GroupOverlay';
 import { allItems, itemsInRect, rectOf } from './marquee';
 import { lineSelection, useStore, type Selection } from '../state/store';
 import { inkOf, InlineEditor } from './InlineEditor';
-import { DragOverlay, SelectionOverlay } from './SequenceOverlay';
+import { alignParticipant, DragOverlay, SelectionOverlay } from './SequenceOverlay';
 import type { Drag, Pt, View } from './types';
 import { keys } from '../lib/platform';
 
@@ -44,6 +44,12 @@ function toggleSelected(item: Selection) {
 
 // Handles of the selected link
 const LINK_HANDLES = new Set(['from', 'to', 'segment', 'bend', 'bend-new']);
+
+// Everything selected (⌘A): drag moves the diagram
+const allSelected = () => {
+  const { multi } = useStore.getState();
+  return multi.length > 0 && multi.length === allItems().length;
+};
 
 const isTyping = () => {
   const el = document.activeElement as HTMLElement | null;
@@ -166,6 +172,18 @@ export function Canvas() {
         const step = e.shiftKey ? 10 : 1;
         const [dx, dy] = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] }[e.key] ?? [0, 0];
         flowActions.moveNodes(selectedItems().flatMap((q) => (q.kind === 'node' ? [q.id] : [])), dx, dy);
+      } else if (e.key.startsWith('Arrow') && !useStore.getState().flowLayout && !allSelected() && selectedItems().some((q) => q.kind === 'participant')) {
+        // Nudge participants (Shift: 10px)
+        e.preventDefault();
+        const step = e.shiftKey ? 10 : 1;
+        const [dx, dy] = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] }[e.key] ?? [0, 0];
+        actions.moveParticipants(selectedItems().flatMap((q) => (q.kind === 'participant' ? [q.id] : [])), dx, dy);
+      } else if (e.key.startsWith('Arrow') && !useStore.getState().flowLayout && allSelected()) {
+        // Nudge the diagram (Shift: 10px)
+        e.preventDefault();
+        const step = e.shiftKey ? 10 : 1;
+        const [dx, dy] = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] }[e.key] ?? [0, 0];
+        actions.moveDiagram(dx, dy);
       } else if ((e.key === '=' || e.key === '+') && !e.metaKey && !e.ctrlKey) zoomAt(1.2);
       else if (e.key === '-' && !e.metaKey && !e.ctrlKey) zoomAt(1 / 1.2);
       // H: hand tool, V: select
@@ -199,9 +217,13 @@ export function Canvas() {
     if (useStore.getState().flowLayout) return flowPointerDown(target, p, e.altKey, e.shiftKey);
 
     const handle = target.closest<SVGElement>('[data-handle]');
+    if (allSelected() && !e.shiftKey && target.closest('[data-kind]')) {
+      return updateDrag({ type: 'diagram', start, dx: 0, dy: 0, moved: false });
+    }
     if (handle) {
       const h = handle.dataset.handle!;
       if (h === 'connect' && hover) return updateDrag({ type: 'connect', from: hover.id, start: { x: hover.x, y: hover.y }, to: p });
+      if (h === 'stretch' && selection?.kind === 'participant') return updateDrag({ type: 'stretch', id: selection.id, start, dy: 0, moved: false });
       if (h === 'resize' && selection?.kind === 'participant') {
         const lp = L.participants.find((q) => q.id === selection.id)!;
         return updateDrag({ type: 'resize', id: lp.id, start, w: lp.width, h: lp.height, dw: 0, dh: 0 });
@@ -219,9 +241,10 @@ export function Canvas() {
     }
     if (kind === 'participant') {
       const id = el!.dataset.id!;
-      select({ kind: 'participant', id });
-      const lp = L.participants.find((q) => q.id === id)!;
-      return updateDrag({ type: 'participant', id, start, origX: lp.x, dx: 0, moved: false });
+      // Part of a group: move them all
+      const group = useStore.getState().multi.flatMap((q) => (q.kind === 'participant' ? [q.id] : []));
+      if (!group.includes(id)) select({ kind: 'participant', id });
+      return updateDrag({ type: 'participant', id, ids: group.includes(id) ? group : [id], start, dx: 0, dy: 0, moved: false });
     }
     if (kind === 'message' || kind === 'note') {
       select({ kind, line });
@@ -314,7 +337,7 @@ export function Canvas() {
       const overElement = (e.target as Element).closest('[data-kind], [data-handle]');
       if ((e.target as Element).closest('[data-handle="connect"]')) return;
       const lp = nearestParticipant(layout, p.x);
-      if (!overElement && lp && Math.abs(lp.x - p.x) < 10 / view.k + 4 && p.y > layout.lifelineTop + 6 && p.y < layout.lifelineBottom - 4)
+      if (!overElement && lp && Math.abs(lp.x - p.x) < 10 / view.k + 4 && p.y > Math.max(layout.lifelineTop, lp.top + lp.height) + 6 && p.y < lp.bottom - 4)
         setHover({ id: lp.id, x: lp.x, y: p.y });
       else if (hover) setHover(null);
       return;
@@ -332,8 +355,17 @@ export function Canvas() {
       case 'marquee':
         updateDrag({ ...d, to: p });
         break;
-      case 'participant':
-        updateDrag({ ...d, dx: p.x - d.start.x, moved: d.moved || moved(d.start) });
+      case 'participant': {
+        // Snap to other participants
+        const a = e.altKey ? { dx: p.x - d.start.x, dy: p.y - d.start.y } : alignParticipant(layout, d.id, p.x - d.start.x, p.y - d.start.y, view.k);
+        updateDrag({ ...d, dx: a.dx, dy: a.dy, guideX: a.guideX, guideY: a.guideY, moved: d.moved || moved(d.start) });
+        break;
+      }
+      case 'stretch':
+        updateDrag({ ...d, dy: p.y - d.start.y, moved: d.moved || moved(d.start) });
+        break;
+      case 'diagram':
+        updateDrag({ ...d, dx: p.x - d.start.x, dy: p.y - d.start.y, moved: d.moved || moved(d.start) });
         break;
       case 'statement':
         updateDrag({ ...d, x: p.x, y: p.y, moved: d.moved || moved(d.start) });
@@ -378,7 +410,22 @@ export function Canvas() {
         if (!d.moved && d.clear) useStore.getState().select(null);
         break;
       case 'participant':
-        if (d.moved) actions.moveParticipant(d.id, d.origX + d.dx);
+        if (d.moved) actions.moveParticipants(d.ids, d.dx, d.dy);
+        break;
+      case 'stretch':
+        if (d.moved) actions.stretchLifeline(d.id, d.dy);
+        break;
+      case 'diagram':
+        if (d.moved) actions.moveDiagram(d.dx, d.dy);
+        else {
+          // Plain click: select that item
+          const el = document.elementFromPoint(e.clientX, e.clientY)?.closest<SVGElement>('[data-kind]');
+          const kind = el?.dataset.kind;
+          const line = Number(el?.dataset.line);
+          if (kind === 'participant') useStore.getState().select({ kind, id: el!.dataset.id! });
+          else if (kind === 'message' || kind === 'note') useStore.getState().select({ kind, line });
+          else if (kind === 'frame' || kind === 'frame-label') useStore.getState().select({ kind: 'frame', line });
+        }
         break;
       case 'statement':
         if (d.moved) actions.moveStatement(d.line, d.y, d.x - d.start.x);
@@ -492,7 +539,7 @@ export function Canvas() {
   const k = view.k;
   const accent = 'var(--accent)';
   const grid = `color-mix(in srgb, ${theme.text} 22%, ${theme.background})`;
-  const cursor = panning || drag?.type === 'pan' ? (drag ? 'grabbing' : 'grab') : drag?.type === 'participant' ? 'ew-resize' : drag?.type === 'statement' || (drag?.type === 'node' && drag.moved) ? 'grabbing' : 'default';
+  const cursor = panning || drag?.type === 'pan' ? (drag ? 'grabbing' : 'grab') : drag?.type === 'stretch' ? 'ns-resize' : drag?.type === 'statement' || (drag?.type === 'participant' && drag.moved) || drag?.type === 'diagram' || (drag?.type === 'node' && drag.moved) ? 'grabbing' : 'default';
   const hoverNode = flowLayout && !drag && !panning ? flowLayout.nodes.find((n) => n.id === flowHover) : undefined;
   const flowCursor = endHover && !drag && !panning ? 'move' : cursor;
 
@@ -525,6 +572,8 @@ export function Canvas() {
         onDoubleClick={onDoubleClick}
       >
         <g transform={`translate(${view.x} ${view.y}) scale(${k})`}>
+          <g transform={drag?.type === 'diagram' ? `translate(${drag.dx} ${drag.dy})` : undefined}>
+          {drag?.type === 'participant' && drag.moved && <style>{drag.ids.map((id) => `.diagram-main [data-kind="participant"][data-id="${CSS.escape(id)}"]`).join(', ') + ' { opacity: 0.25; }'}</style>}
           {drag?.type === 'statement' && drag.moved && <style>{`.diagram-main [data-line="${drag.line}"] { opacity: 0.25; }`}</style>}
           {drag?.type === 'node' && drag.moved && <style>{drag.ids.map((id) => `.diagram-main [data-kind="node"][data-id="${CSS.escape(id)}"]`).join(', ') + ' { opacity: 0.25; }'}</style>}
           <g className="diagram-main">
@@ -545,6 +594,7 @@ export function Canvas() {
           {drag?.type === 'marquee' && <MarqueeBox start={drag.start} to={drag.to} k={k} />}
           {drag && drag.type !== 'marquee' && flowLayout && <FlowDragOverlay drag={drag as FlowDrag} layout={flowLayout} theme={theme} k={k} />}
           {drag && drag.type !== 'marquee' && !flowLayout && <DragOverlay drag={drag} layout={layout} theme={theme} k={k} end={contentEnd(doc.lines)} />}
+          </g>
         </g>
       </svg>
       {editing && <InlineEditor target={editing} layout={layout} flow={flowLayout} view={view} fontFamily={theme.fontFamily} ink={inkOf(flowLayout, editing, theme.text)} />}

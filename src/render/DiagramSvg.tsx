@@ -20,7 +20,7 @@ function Text({ lines, x, y, fill, anchor = 'middle', weight }: { lines: string[
   );
 }
 
-function ParticipantShape({ p, y, t }: { p: LParticipant; y: number; t: Theme }) {
+export function ParticipantShape({ p, y, t }: { p: LParticipant; y: number; t: Theme }) {
   const left = p.x - p.width / 2;
   const { fill, stroke } = participantColors(t, p.index);
   const sw = t.strokeWidth;
