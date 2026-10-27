@@ -1,6 +1,6 @@
 // Line operations
 import { analyze } from './parser';
-import type { ArrowToken, BlockKind, Doc, Line, NotePlacement, ParticipantKind, Statement } from './model';
+import type { ArrowToken, BlockKind, DiagramConfig, Doc, Line, NotePlacement, ParticipantKind, Statement } from './model';
 
 const fresh = (stmt: Statement): Line => ({ raw: null, indent: '', stmt });
 
@@ -191,24 +191,29 @@ export function unwrapBlock(lines: Line[], start: number): Line[] {
 
 const fm = (text: string): Line => ({ raw: text, indent: '', stmt: { type: 'frontmatter', text } });
 
+// Any diagram's lines
+type AnyLine = { raw: string | null; indent: string; stmt: { type: string; text?: string } };
+
 // Set theme
-export function setConfigTheme(doc: Doc, theme: string): Line[] {
-  const { config, lines } = doc;
+export function setConfigTheme<L extends AnyLine>(doc: { config: DiagramConfig; lines: L[] }, theme: string): L[] {
+  const { config } = doc;
+  const lines = doc.lines as AnyLine[];
+  const done = (out: AnyLine[]) => out as L[];
   if (config.themeLine !== undefined) {
     const line = lines[config.themeLine];
     const text = line.raw ?? '';
     const next = text.replace(/(theme['"]?\s*:\s*['"]?)[\w-]+/, `$1${theme}`);
     const out = lines.slice();
     out[config.themeLine] = line.stmt.type === 'frontmatter' ? fm(next) : { ...line, raw: next, stmt: { type: 'comment', text: next.trim().slice(2) } };
-    return out;
+    return done(out);
   }
   if (config.frontmatter) {
     const [start, end] = config.frontmatter;
-    const cfg = lines.findIndex((l, i) => i > start && i < end && /^config\s*:\s*$/.test((l.stmt as { text: string }).text));
+    const cfg = lines.findIndex((l, i) => i > start && i < end && /^config\s*:\s*$/.test(l.stmt.text ?? ''));
     const out = lines.slice();
     if (cfg >= 0) out.splice(cfg + 1, 0, fm(`  theme: ${theme}`));
     else out.splice(end, 0, fm('config:'), fm(`  theme: ${theme}`));
-    return out;
+    return done(out);
   }
-  return [fm('---'), fm('config:'), fm(`  theme: ${theme}`), fm('---'), ...lines];
+  return done([fm('---'), fm('config:'), fm(`  theme: ${theme}`), fm('---'), ...lines]);
 }

@@ -20,21 +20,24 @@ import {
   setStatement,
   unwrapBlock,
 } from '../core/ops';
+import { isBlankDiagram, startCode } from '../core/diagram';
 import { analyze } from '../core/parser';
-import { useStore, type EditTarget, type Selection } from './store';
+import { addFlowItem, flowDelete, flowEditText, flowSetText, type FlowPaletteItem } from './flowActions';
+import { current as S, type EditTarget, type FlowSelection, type Selection } from './store';
 
-// Store (renders pending code first)
-const S = () => {
-  useStore.getState().flush();
-  return useStore.getState();
-};
-const cloneOverrides = (o: LayoutOverrides): LayoutOverrides => ({ participants: Object.fromEntries(Object.entries(o.participants).map(([k, v]) => [k, { ...v }])) });
+const cloneOverrides = (o: LayoutOverrides): LayoutOverrides => ({ ...o, participants: Object.fromEntries(Object.entries(o.participants).map(([k, v]) => [k, { ...v }])) });
 
-export type PaletteItem = ParticipantKind | 'message' | 'note' | Exclude<BlockKind, 'rect'>;
+export type PaletteItem = ParticipantKind | 'message' | 'note' | Exclude<BlockKind, 'rect'> | FlowPaletteItem;
+
+const isFlowItem = (i: PaletteItem): i is FlowPaletteItem => i === 'subgraph' || i.startsWith('flow:');
+
+// Flowchart target
+const isFlow = (t: EditTarget | Selection): t is FlowSelection => t.kind === 'node' || t.kind === 'edge' || t.kind === 'subgraph';
 
 
 // Edit text
 export function editText(t: EditTarget): string {
+  if (isFlow(t)) return flowEditText(t);
   const { doc } = S();
   if (t.kind === 'participant') return doc.participants.find((p) => p.id === t.id)?.label ?? '';
   const s = doc.lines[t.line]?.stmt;
@@ -45,6 +48,7 @@ export function editText(t: EditTarget): string {
 }
 
 export function setText(t: EditTarget, text: string) {
+  if (isFlow(t)) return flowSetText(t, text);
   const { doc, overrides } = S();
   if (t.kind === 'participant') {
     const lines = renameParticipant(doc, t.id, text.replace(/\s*\n\s*/g, ' '));
@@ -69,6 +73,7 @@ export function setText(t: EditTarget, text: string) {
 
 export function deleteSelection(sel: Selection | null = S().selection) {
   if (!sel) return;
+  if (isFlow(sel)) return flowDelete(sel);
   const { doc, overrides } = S();
   if (sel.kind === 'participant') {
     const ov = cloneOverrides(overrides);
@@ -88,6 +93,10 @@ export function deleteBlockWithContents(line: number) {
 
 // Add palette item
 export function addItem(item: PaletteItem, at?: { x: number; y: number }) {
+  // First shape picks the kind
+  const kind = isFlowItem(item) ? 'flowchart' : 'sequence';
+  if (isBlankDiagram(S().code)) S().setCode(startCode(S().code, kind));
+  if (isFlowItem(item)) return addFlowItem(item, at);
   const { doc, layout } = S();
   const end = contentEnd(doc.lines);
   const line = at ? dropLine(layout, at.y, end) : end;

@@ -1,17 +1,12 @@
 // App appearance
 import { create } from 'zustand';
+import { readString, writeString } from '../lib/storage';
 
 export type Appearance = 'system' | 'light' | 'dark';
 
-const KEY = 'seqdraw.appearance';
-
 function read(): Appearance {
-  try {
-    const v = localStorage.getItem(KEY);
-    return v === 'light' || v === 'dark' ? v : 'system';
-  } catch {
-    return 'system';
-  }
+  const v = readString('appearance');
+  return v === 'light' || v === 'dark' ? v : 'system';
 }
 
 function apply(a: Appearance) {
@@ -24,11 +19,7 @@ export const useAppearance = create<{ appearance: Appearance; setAppearance(a: A
   appearance: read(),
   setAppearance(appearance) {
     apply(appearance);
-    try {
-      localStorage.setItem(KEY, appearance);
-    } catch {
-      // ignore
-    }
+    writeString('appearance', appearance);
     set({ appearance });
   },
 }));

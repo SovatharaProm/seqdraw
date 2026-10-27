@@ -1,9 +1,10 @@
 import { useState, type ReactNode } from 'react';
 import { useStore } from '../state/store';
 import { EXAMPLES } from './examples';
-import { useAppearance, type Appearance } from './appearance';
+import { useAppearance, type Appearance } from '../state/appearance';
 import { Icons, Logo } from './icons';
-import { Menu } from './Menu';
+import { IconButton } from './components/Button';
+import { Menu } from './components/Menu';
 import { exportAs, newDiagram, openDialog, save, type ExportFormat } from './fileActions';
 
 const APPEARANCES: { value: Appearance; label: string; Icon: () => ReactNode }[] = [
@@ -29,6 +30,13 @@ function AppearanceMenu() {
   );
 }
 
+const QUALITY: [number, string][] = [
+  [1, 'Standard'],
+  [2, 'Sharp'],
+  [3, 'Sharper'],
+  [4, 'Print'],
+];
+
 function ExportMenu() {
   const [embed, setEmbed] = useState(true);
   const [scale, setScale] = useState(2);
@@ -45,25 +53,32 @@ function ExportMenu() {
     </button>
   );
   return (
-    <Menu label="Export" title="Download or copy the diagram">
+    <Menu label={<><Icons.export /> Export</>} title="Download or copy the diagram">
       {(close) => (
         <>
           <div className="menu-section">Image</div>
-          {item('png', 'PNG', `${scale}× resolution`, close)}
+          {item('png', 'PNG', QUALITY.find(([s]) => s === scale)![1].toLowerCase(), close)}
           {item('png-transparent', 'PNG (transparent)', 'no background', close)}
           {item('svg', 'SVG', 'vector, scalable', close)}
           {item('pdf', 'PDF', 'vector, print-ready', close)}
           <div className="menu-options">
-            <label title="Store the diagram inside the PNG/SVG so it can be opened again in SeqDraw and edited">
-              <input type="checkbox" checked={embed} onChange={(e) => setEmbed(e.target.checked)} /> Editable PNG/SVG
+            <label className="menu-option" title="Hide the project inside the image so you can drop it back into SeqDraw and keep editing">
+              <input type="checkbox" checked={embed} onChange={(e) => setEmbed(e.target.checked)} />
+              <span>
+                Keep editable
+                <small>Reopen the PNG/SVG in SeqDraw later. Turn off to share only the picture.</small>
+              </span>
             </label>
-            <label>
-              Scale{' '}
-              <select value={scale} onChange={(e) => setScale(+e.target.value)}>
-                {[1, 2, 3, 4].map((s) => (
-                  <option key={s} value={s}>{s}×</option>
-                ))}
-              </select>
+            <label className="menu-option stack">
+              <span className="menu-option-row">
+                PNG quality
+                <select value={scale} onChange={(e) => setScale(+e.target.value)}>
+                  {QUALITY.map(([s, name]) => (
+                    <option key={s} value={s}>{name} {s}×</option>
+                  ))}
+                </select>
+              </span>
+              <small>Higher is sharper, but a bigger file. SVG and PDF are always sharp.</small>
             </label>
           </div>
           <div className="menu-section">Code</div>
@@ -96,28 +111,44 @@ export function Toolbar({ onHelp }: { onHelp: () => void }) {
       </div>
 
       <div className="tool-group">
-        <Menu label="New" title="Start a new diagram">
-          {(close) =>
-            EXAMPLES.map((ex) => (
-              <button key={ex.name} className="menu-item" onClick={() => (close(), newDiagram(ex.code))}>
-                <span>{ex.name}</span>
+        <Menu label={<><Icons.newFile /> New</>} title="Start a new diagram">
+          {(close) => (
+            <>
+              <div className="menu-section">Blank</div>
+              <button className="menu-item" onClick={() => (close(), newDiagram('', 'untitled', 'draw'))}>
+                <span>Draw</span>
+                <small>shapes on the canvas</small>
               </button>
-            ))
-          }
+              <button className="menu-item" onClick={() => (close(), newDiagram('', 'untitled', 'code'))}>
+                <span>Write code</span>
+                <small>Mermaid syntax</small>
+              </button>
+              {(['Sequence', 'Flowchart'] as const).map((group) => (
+                <div key={group}>
+                  <div className="menu-section">{group === 'Sequence' ? 'Sequence diagrams' : 'Flowcharts'}</div>
+                  {EXAMPLES.filter((ex) => ex.group === group).map((ex) => (
+                    <button key={ex.name} className="menu-item" onClick={() => (close(), newDiagram(ex.code))}>
+                      <span>{ex.name}</span>
+                    </button>
+                  ))}
+                </div>
+              ))}
+            </>
+          )}
         </Menu>
-        <button onClick={openDialog} title="Open a .seqd, .mmd, or editable PNG/SVG file (⌘O)">Open</button>
-        <button className="primary" onClick={() => save()} title="Save a .seqd file you can reopen later (⌘S)">Save</button>
+        <button onClick={openDialog} title="Open a .seqd, .mmd, or editable PNG/SVG file (⌘O)"><Icons.folder /> Open</button>
+        <button className="primary" onClick={() => save()} title="Save a .seqd file you can reopen later (⌘S)"><Icons.save /> Save</button>
         <ExportMenu />
       </div>
 
       <div className="tool-group">
-        <button className="icon-btn" onClick={undo} disabled={!canUndo} title="Undo (⌘Z)" aria-label="Undo"><Icons.undo /></button>
-        <button className="icon-btn" onClick={redo} disabled={!canRedo} title="Redo (⇧⌘Z)" aria-label="Redo"><Icons.redo /></button>
+        <IconButton label="Undo" shortcut="⌘Z" onClick={undo} disabled={!canUndo}><Icons.undo /></IconButton>
+        <IconButton label="Redo" shortcut="⇧⌘Z" onClick={redo} disabled={!canRedo}><Icons.redo /></IconButton>
       </div>
 
       <div className="spacer" />
       <AppearanceMenu />
-      <button className="icon-btn" onClick={onHelp} title="Help & shortcuts" aria-label="Help"><Icons.help /></button>
+      <IconButton label="Help & shortcuts" onClick={onHelp}><Icons.help /></IconButton>
     </header>
   );
 }

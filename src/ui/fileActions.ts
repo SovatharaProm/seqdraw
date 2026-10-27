@@ -1,19 +1,19 @@
 import { requestFit } from '../canvas/Canvas';
+import { detectKind } from '../core/diagram';
 import { emptyOverrides } from '../core/model';
+import { parseFlow } from '../flow/parser';
+import { serializeFlow } from '../flow/serializer';
 import { setConfigTheme } from '../core/ops';
 import { parse } from '../core/parser';
 import { serialize } from '../core/serializer';
 import { DEFAULT_THEME, THEMES } from '../core/themes';
 import { download, pdfBlob, pngBlob, projectBlob, svgString } from '../io/export';
 import { PROJECT_EXT, baseName, openFile } from '../io/project';
-import { useStore, type ProjectData } from '../state/store';
-import { toast } from './toast';
+import { current as S, type ProjectData } from '../state/store';
+import { getEditorView } from '../editor/CodeEditor';
+import { usePanel } from '../state/panel';
+import { toast } from '../state/toast';
 
-// Store (renders pending code first)
-const S = () => {
-  useStore.getState().flush();
-  return useStore.getState();
-};
 const project = (): ProjectData => ({ code: S().code, overrides: S().overrides, theme: S().theme });
 const theme = () => THEMES[S().theme] ?? THEMES.default;
 
@@ -28,15 +28,23 @@ export function confirmDiscard(): boolean {
   return !S().dirty || window.confirm('You have unsaved changes. Discard them?');
 }
 
-export function newDiagram(code: string, name = 'untitled') {
+export function newDiagram(code: string, name = 'untitled', mode?: 'draw' | 'code') {
   if (!confirmDiscard()) return;
+  // Draw hides the code, Write shows it
+  if (mode) usePanel.getState().setOpen(mode === 'code');
   saveHandle = null;
   // Keep theme
-  const doc = parse(code);
   const current = S().theme;
-  if (current !== DEFAULT_THEME && doc.config.theme === undefined) code = serialize(setConfigTheme(doc, current));
+  if (detectKind(code) === 'flowchart') {
+    const flow = parseFlow(code);
+    if (current !== DEFAULT_THEME && flow.config.theme === undefined) code = serializeFlow(setConfigTheme(flow, current));
+  } else {
+    const doc = parse(code);
+    if (current !== DEFAULT_THEME && doc.config.theme === undefined) code = serialize(setConfigTheme(doc, current));
+  }
   S().load({ code, overrides: emptyOverrides(), theme: '' }, name);
   requestAnimationFrame(requestFit);
+  if (mode === 'code') requestAnimationFrame(() => getEditorView()?.focus());
 }
 
 export async function loadFile(file: File) {
@@ -86,7 +94,8 @@ export async function save(saveAs = false) {
 export type ExportFormat = 'svg' | 'png' | 'png-transparent' | 'pdf' | 'mmd' | 'copy-code' | 'copy-markdown' | 'copy-svg';
 
 export async function exportAs(format: ExportFormat, opts: { embed: boolean; scale: number }) {
-  const { layout, code, fileName } = S();
+  const { code, fileName } = S();
+  const layout = S().flowLayout ?? S().layout;
   const embed = opts.embed ? project() : undefined;
   try {
     switch (format) {

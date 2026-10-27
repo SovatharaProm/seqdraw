@@ -1,10 +1,10 @@
 import { useState } from 'react';
 import { useStore } from '../state/store';
-import { Icons } from '../ui/icons';
+import { DIAGRAM_KINDS } from '../core/diagram';
+import { Icons, ShapeIcon } from '../ui/icons';
 import { getEditorView } from './CodeEditor';
-import { SNIPPET_GROUPS, SNIPPETS, insertSnippet, type Snippet } from './snippets';
+import { currentSnippets, insertSnippet, type Snippet } from './snippets';
 
-const DOCS_URL = 'https://mermaid.js.org/syntax/sequenceDiagram.html';
 
 export type EditorTab = 'code' | 'snippets';
 
@@ -12,6 +12,7 @@ export type EditorTab = 'code' | 'snippets';
 export function EditorHeader({ tab, onTab, onClose }: { tab: EditorTab; onTab: (t: EditorTab) => void; onClose: () => void }) {
   const autoUpdate = useStore((s) => s.autoUpdate);
   const pending = useStore((s) => s.pending !== null);
+  const kind = useStore((s) => s.kind);
   const { setAutoUpdate, flush } = useStore.getState();
   return (
     <div className="editor-header">
@@ -35,7 +36,7 @@ export function EditorHeader({ tab, onTab, onClose }: { tab: EditorTab; onTab: (
         </button>
         Live
       </label>
-      <a className="header-btn icon" href={DOCS_URL} target="_blank" rel="noreferrer" title="Mermaid sequence diagram docs" aria-label="Docs">
+      <a className="header-btn icon" href={DIAGRAM_KINDS[kind].docs} target="_blank" rel="noreferrer" title={`Mermaid ${DIAGRAM_KINDS[kind].name.toLowerCase()} docs`} aria-label="Docs">
         <Icons.book />
       </a>
       <button className="header-btn icon" onClick={onClose} title="Hide code" aria-label="Hide code">
@@ -51,6 +52,9 @@ const preview = (s: Snippet) => s.template('A', 'B').replace(/\$\{\d+:([^}]*)\}/
 // Snippet list
 export function SnippetPanel({ onInserted }: { onInserted: () => void }) {
   const [query, setQuery] = useState('');
+  // Re-render on kind change
+  useStore((s) => s.kind);
+  const { snippets, groups } = currentSnippets();
   const q = query.trim().toLowerCase();
   const match = (s: Snippet) => !q || `${s.label} ${s.keyword} ${s.detail}`.toLowerCase().includes(q);
   const insert = (s: Snippet) => {
@@ -64,8 +68,8 @@ export function SnippetPanel({ onInserted }: { onInserted: () => void }) {
     <section className="snippets" aria-label="Snippets">
       <input className="snippet-search" placeholder="Filter snippets…" value={query} onChange={(e) => setQuery(e.target.value)} spellCheck={false} />
       <div className="snippets-body">
-        {SNIPPET_GROUPS.map((g) => {
-          const items = SNIPPETS.filter((s) => s.group === g && match(s));
+        {groups.map((g) => {
+          const items = snippets.filter((s) => s.group === g && match(s));
           if (!items.length) return null;
           return (
             <div key={g} className="snippet-group">
@@ -74,7 +78,7 @@ export function SnippetPanel({ onInserted }: { onInserted: () => void }) {
                 const Glyph = Icons[s.icon];
                 return (
                   <button key={s.id} className="snippet-row" onClick={() => insert(s)} title={`${s.detail}. Inserts at the cursor.`}>
-                    <span className="snippet-icon"><Glyph /></span>
+                    <span className="snippet-icon">{s.shape ? <ShapeIcon shape={s.shape} /> : <Glyph />}</span>
                     <span className="snippet-label">{s.label}</span>
                     <code>{preview(s).split('\n')[0]}</code>
                   </button>

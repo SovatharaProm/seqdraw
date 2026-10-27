@@ -1,13 +1,13 @@
 import { autocompletion, completionKeymap } from '@codemirror/autocomplete';
 import { defaultKeymap, indentWithTab } from '@codemirror/commands';
-import { HighlightStyle, StreamLanguage, indentUnit, syntaxHighlighting } from '@codemirror/language';
+import { HighlightStyle, StreamLanguage, indentUnit, syntaxHighlighting, type StringStream } from '@codemirror/language';
 import { linter, lintGutter } from '@codemirror/lint';
 import { Annotation, EditorState, StateEffect, StateField } from '@codemirror/state';
 import { Decoration, EditorView, ViewPlugin, drawSelection, highlightActiveLine, keymap, lineNumbers, type DecorationSet, type ViewUpdate } from '@codemirror/view';
 import { tags } from '@lezer/highlight';
 import { useEffect, useRef } from 'react';
-import { findBlockEnd } from '../core/ops';
-import { selectionForLine, selectionLine, useStore } from '../state/store';
+import { FLOW_SHAPES, SHAPE_OPENERS } from '../flow/shapes';
+import { lineSelection, selectionRange, useStore } from '../state/store';
 import { completeMermaid } from './snippets';
 
 // Active editor
@@ -19,12 +19,106 @@ const External = Annotation.define<boolean>();
 
 const KEYWORDS = /^(participant|actor|as|loop|alt|else|opt|par|and|critical|option|break|rect|end|activate|deactivate|autonumber|title|off)\b/;
 
+const FLOW_KEYWORDS = /^(subgraph|end|direction|classDef|class|style|linkStyle|click|call|href|default)\b/;
+const FLOW_DIR = /^(TB|TD|BT|LR|RL)\b/;
+const FLOW_LINK = /^[<ox]?(-{2,}>|-{2,}[ox](?=[\s|]|$)|-{3,}|-\.+->|-\.+-[ox]?|={2,}>|={2,}[ox]|={3,}|~{3,})/;
+const FLOW_LINK_START = /^[<ox]?(--|==|-\.)(?=\s)/;
+const FLOW_LINK_END = /(-{2,}>|-{2,}[ox]|-{3,}|\.+->|\.+-|={2,}>|={3,})/;
+const FLOW_ID = /^[\p{L}\p{N}_]+(?:[.\-][\p{L}\p{N}_]+)*/u;
+// Closers per opener
+const CLOSERS = Object.fromEntries(SHAPE_OPENERS.map((o) => [o, FLOW_SHAPES.filter((d) => d.open === o).map((d) => d.close)]));
+
+type TokState = { afterColon: boolean; fm: 0 | 1 | 2; flow: boolean; close: string[] | null; pipe: boolean; linkText: boolean; afterId: boolean };
+
+// Read until one of `ends`
+function until(stream: StringStream, ends: string[]) {
+  const rest = stream.string.slice(stream.pos);
+  if (rest.startsWith('"')) {
+    const q = rest.indexOf('"', 1);
+    if (q > 0) return void (stream.pos += q + 1);
+  }
+  const at = Math.min(...ends.map((e) => rest.indexOf(e)).filter((i) => i >= 0));
+  if (isFinite(at)) stream.pos += at;
+  else stream.skipToEnd();
+}
+
+// Flowchart tokens
+function flowToken(stream: StringStream, state: TokState): string | null {
+  if (state.close) {
+    const close = state.close.find((c) => stream.match(c));
+    if (close) {
+      state.close = null;
+      return 'punctuation';
+    }
+    until(stream, state.close);
+    return 'string';
+  }
+  if (state.pipe) {
+    if (stream.eat('|')) {
+      state.pipe = false;
+      return 'punctuation';
+    }
+    until(stream, ['|']);
+    return 'string';
+  }
+  if (state.linkText) {
+    state.linkText = false;
+    const rest = stream.string.slice(stream.pos);
+    const m = rest.match(FLOW_LINK_END);
+    if (m && m.index) {
+      stream.pos += m.index;
+      return 'string';
+    }
+  }
+  const afterId = state.afterId;
+  state.afterId = false;
+  if (afterId) {
+    const open = SHAPE_OPENERS.find((o) => stream.match(o));
+    if (open) {
+      state.close = CLOSERS[open];
+      return 'punctuation';
+    }
+    if (stream.match(/^@\{[^}]*\}/)) return 'meta';
+    if (stream.match(/^:::[\w-]+/)) return 'meta';
+  }
+  if (stream.eatSpace()) return null;
+  if (stream.match('%%')) {
+    stream.skipToEnd();
+    return 'comment';
+  }
+  if (stream.match(/^(flowchart|graph)\b/)) return 'heading';
+  if (stream.match(FLOW_DIR)) return 'keyword';
+  if (stream.match(FLOW_KEYWORDS)) return 'keyword';
+  if (stream.match(FLOW_LINK)) return 'operator';
+  if (stream.match(FLOW_LINK_START)) {
+    state.linkText = true;
+    return 'operator';
+  }
+  if (stream.eat('|')) {
+    state.pipe = true;
+    return 'punctuation';
+  }
+  if (stream.match(/^#[0-9a-fA-F]{3,8}\b/)) return 'meta';
+  if (stream.match(/^:::[\w-]+/)) return 'meta';
+  if (stream.match(FLOW_ID)) {
+    state.afterId = true;
+    return 'variableName';
+  }
+  if (stream.eat('&')) return 'operator';
+  stream.next();
+  return null;
+}
+
 // Mermaid tokenizer
-const mermaidSequence = StreamLanguage.define<{ afterColon: boolean; fm: 0 | 1 | 2 }>({
-  startState: () => ({ afterColon: false, fm: 0 }),
+const mermaidSequence = StreamLanguage.define<TokState>({
+  startState: () => ({ afterColon: false, fm: 0, flow: false, close: null, pipe: false, linkText: false, afterId: false }),
   token(stream, state) {
     if (stream.sol()) {
       state.afterColon = false;
+      state.close = null;
+      state.pipe = false;
+      state.linkText = false;
+      state.afterId = false;
       if (state.fm !== 2 && stream.match(/^---\s*$/)) {
         state.fm = state.fm === 0 ? 1 : 2;
         return 'meta';
@@ -37,6 +131,11 @@ const mermaidSequence = StreamLanguage.define<{ afterColon: boolean; fm: 0 | 1 |
       if (stream.eat(':')) return 'punctuation';
       stream.skipToEnd();
       return 'string';
+    }
+    if (stream.sol() && !state.flow && stream.match(/^\s*(flowchart|graph)\b/, false)) state.flow = true;
+    if (state.flow) {
+      if (stream.sol() && stream.match(/^\s*sequenceDiagram\b/, false)) state.flow = false;
+      else return flowToken(stream, state);
     }
     if (state.afterColon) {
       stream.skipToEnd();
@@ -123,7 +222,7 @@ const linkedLines = StateField.define<DecorationSet>({
 });
 
 const editorTheme = EditorView.theme({
-  '&': { height: '100%', fontSize: '13px', backgroundColor: 'var(--panel)', color: 'var(--text)' },
+  '&': { height: '100%', fontSize: 'var(--code-size, 13px)', backgroundColor: 'var(--panel)', color: 'var(--text)' },
   // No ligatures
   '.cm-scroller': { fontFamily: 'var(--font-mono)', lineHeight: '1.65', fontVariantLigatures: 'none' },
   '.cm-gutters': { backgroundColor: 'var(--panel)', color: 'var(--muted)', border: 'none' },
@@ -185,7 +284,7 @@ export function CodeEditor() {
             if (u.docChanged && !external) store().typeCode(u.state.doc.toString());
             if (u.selectionSet && !external && u.view.hasFocus) {
               const line = u.state.doc.lineAt(u.state.selection.main.head).number - 1;
-              store().select(selectionForLine(store().doc, line), 'editor');
+              store().select(lineSelection(store(), line), 'editor');
             }
           }),
         ],
@@ -210,10 +309,8 @@ export function CodeEditor() {
     // Selection -> editor
     const unsubSel = useStore.subscribe((s, prev) => {
       if (s.selection === prev.selection && s.code === prev.code) return;
-      const line = s.selection ? selectionLine(s.doc, s.selection) : -1;
+      const [line, to] = s.selection ? selectionRange(s, s.selection) : [-1, -1];
       if (line < 0) return view.dispatch({ effects: setLinked.of(null), annotations: External.of(true) });
-      let to = line;
-      if (s.selection?.kind === 'frame') to = Math.max(line, findBlockEnd(s.doc.lines, line));
       const effects = [setLinked.of({ from: line + 1, to: to + 1 })];
       if (s.selectionSource === 'canvas' && s.selection !== prev.selection && line < view.state.doc.lines)
         effects.push(EditorView.scrollIntoView(view.state.doc.line(line + 1).from, { y: 'center' }) as never);

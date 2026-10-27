@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { Icons } from '../icons';
 
 // Dropdown menu
 export function Menu({ label, title, align, caret = true, children }: { label: ReactNode; title?: string; align?: 'right'; caret?: boolean; children: (close: () => void) => ReactNode }) {
@@ -18,7 +19,8 @@ export function Menu({ label, title, align, caret = true, children }: { label: R
   return (
     <div className="menu" ref={ref}>
       <button title={title} aria-label={caret ? undefined : title} className={`${open ? 'active' : ''} ${caret ? '' : 'icon-btn'}`} onClick={() => setOpen(!open)} aria-expanded={open}>
-        {label} {caret && <span className="caret">▾</span>}
+        {label}
+        {caret && <span className="caret"><Icons.chevronDown /></span>}
       </button>
       {open && <div className={`menu-pop ${align ?? ''}`}>{children(() => setOpen(false))}</div>}
     </div>

@@ -89,8 +89,11 @@ export function parseLines(code: string): Line[] {
 
 const THEME_IN_DIRECTIVE = /['"]?theme['"]?\s*:\s*['"]([\w-]+)['"]/;
 
+// Config line
+type ConfigLine = { stmt: { type: string; text?: string } };
+
 // Read config
-function readConfig(lines: Line[]): { config: DiagramConfig; title?: string } {
+export function readConfig(lines: ConfigLine[]): { config: DiagramConfig; title?: string } {
   const config: DiagramConfig = {};
   let title: string | undefined;
   const fm = lines.map((l, i) => (l.stmt.type === 'frontmatter' ? i : -1)).filter((i) => i >= 0);
@@ -98,7 +101,7 @@ function readConfig(lines: Line[]): { config: DiagramConfig; title?: string } {
     config.frontmatter = [fm[0], fm[fm.length - 1]];
     let inConfig = false;
     for (const i of fm.slice(1, -1)) {
-      const text = (lines[i].stmt as { text: string }).text;
+      const text = lines[i].stmt.text ?? '';
       const m = text.match(/^(\s*)([\w-]+)\s*:\s*(.*?)\s*$/);
       if (!m) continue;
       const [, indent, key, value] = m;
@@ -114,7 +117,8 @@ function readConfig(lines: Line[]): { config: DiagramConfig; title?: string } {
   }
   if (config.theme === undefined) {
     lines.forEach((l, i) => {
-      const m = l.stmt.type === 'comment' && l.stmt.text.startsWith('{') ? l.stmt.text.match(THEME_IN_DIRECTIVE) : null;
+      const text = l.stmt.text ?? '';
+      const m = l.stmt.type === 'comment' && text.startsWith('{') ? text.match(THEME_IN_DIRECTIVE) : null;
       if (m && config.theme === undefined) {
         config.theme = m[1];
         config.themeLine = i;
@@ -193,7 +197,6 @@ export function analyze(lines: Line[]): Doc {
         break;
     }
   });
-  if (!sawHeader) errors.push({ line: 0, message: 'Missing "sequenceDiagram" header' });
   for (const b of blockStack) errors.push({ line: b.line, message: `"${b.kind}" block is never closed with "end"` });
 
   const { config, title: fmTitle } = readConfig(lines);

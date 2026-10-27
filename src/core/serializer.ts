@@ -56,7 +56,7 @@ export function serialize(lines: Line[]): string {
     .join('\n');
 }
 
-function detectIndentUnit(lines: Line[]): string {
+export function detectIndentUnit(lines: { raw: string | null; indent: string; stmt: { type: string } }[]): string {
   for (const l of lines) {
     const t = l.stmt.type;
     if (t !== 'header' && t !== 'blank' && t !== 'frontmatter' && l.raw !== null && l.indent) return l.indent;
