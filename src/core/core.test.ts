@@ -144,6 +144,43 @@ describe('layout', () => {
     const l = layoutDiagram(doc, { participants: { B: { gap: 500 } } });
     expect(l.participants[1].x - l.participants[0].x).toBe(500);
   });
+
+  it('places a dragged participant freely', () => {
+    const doc = parse(SAMPLE);
+    const a = layoutDiagram(doc, emptyOverrides());
+    const b = layoutDiagram(doc, { participants: { U: { x: -300, y: 80 } } });
+    expect(b.participants[1]).toMatchObject({ x: -300, top: 80 });
+    // Others stay put
+    expect(b.participants[0]).toMatchObject({ x: a.participants[0].x, top: a.participants[0].top });
+    expect(b.participants[2].x).toBe(a.participants[2].x);
+    // Footer follows a low header
+    const c = layoutDiagram(doc, { participants: { U: { y: 99999 } } });
+    expect(c.participants[1].top).toBe(99999);
+    expect(c.participants[1].bottom).toBeGreaterThan(99999 + c.participants[1].height);
+  });
+
+  it('stretches a lifeline up or down', () => {
+    const doc = parse(SAMPLE);
+    const a = layoutDiagram(doc, emptyOverrides());
+    const b = layoutDiagram(doc, { participants: { U: { stretch: 120 } } });
+    expect(b.participants[1].bottom).toBe(a.participants[1].bottom + 120);
+    expect(b.participants[0].bottom).toBe(a.participants[0].bottom);
+    expect(b.bounds.height).toBe(a.bounds.height + 120);
+    // Never shorter than the header
+    const c = layoutDiagram(doc, { participants: { U: { stretch: -99999 } } });
+    expect(c.participants[1].bottom).toBeGreaterThan(c.participants[1].top + c.participants[1].height);
+  });
+
+  it('moves the whole diagram by its origin', () => {
+    const doc = parse(SAMPLE);
+    const a = layoutDiagram(doc, emptyOverrides());
+    const b = layoutDiagram(doc, { ...emptyOverrides(), origin: { x: 100, y: -50 } });
+    expect(b.bounds).toEqual({ ...a.bounds, x: a.bounds.x + 100, y: a.bounds.y - 50 });
+    expect(b.participants[0].x).toBe(a.participants[0].x + 100);
+    expect(b.messages[0].y).toBe(a.messages[0].y - 50);
+    expect(b.frames[0].x1).toBe(a.frames[0].x1 + 100);
+    expect(b.lifelineTop).toBe(a.lifelineTop - 50);
+  });
 });
 
 describe('config / themes', () => {

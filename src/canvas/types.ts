@@ -6,8 +6,12 @@ export type Pt = { x: number; y: number };
 
 export type SequenceDrag =
   | { type: 'pan'; start: Pt; view: View; moved: boolean; clear: boolean }
-  | { type: 'participant'; id: string; start: Pt; origX: number; dx: number; moved: boolean }
+  | { type: 'participant'; id: string; ids: string[]; start: Pt; dx: number; dy: number; moved: boolean; guideX?: number; guideY?: number }
   | { type: 'statement'; line: number; start: Pt; x: number; y: number; moved: boolean }
+  // Bottom box: lifeline length
+  | { type: 'stretch'; id: string; start: Pt; dy: number; moved: boolean }
+  // Whole diagram
+  | { type: 'diagram'; start: Pt; dx: number; dy: number; moved: boolean }
   | { type: 'resize'; id: string; start: Pt; w: number; h: number; dw: number; dh: number }
   | { type: 'connect'; from: string; start: Pt; to: Pt }
   | { type: 'reconnect'; line: number; end: 'from' | 'to'; start: Pt; to: Pt }

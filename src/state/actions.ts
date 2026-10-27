@@ -1,5 +1,5 @@
 // Canvas actions
-import { clampParticipantX, dropLine, nearestParticipant } from '../core/layout';
+import { dropLine, nearestParticipant } from '../core/layout';
 import { fromMermaidText, toMermaidText } from '../core/measure';
 import type { BlockKind, LayoutOverrides, ParticipantKind, Statement } from '../core/model';
 import { isParticipantKind, shapeOf } from '../core/participants';
@@ -15,7 +15,6 @@ import {
   noteStmt,
   removeLines,
   renameParticipant,
-  reorderParticipants,
   setParticipantKind,
   setStatement,
   unwrapBlock,
@@ -126,34 +125,52 @@ export function addItem(item: PaletteItem, at?: { x: number; y: number }) {
   S().commit(lines, { select: { kind: 'frame', line }, edit: { kind: 'frame', line } });
 }
 
-// Move participant
-export function moveParticipant(id: string, x: number) {
-  const { doc, layout, overrides } = S();
-  const ps = layout.participants;
-  const cur = ps.find((p) => p.id === id);
-  if (!cur) return;
-  const others = ps.filter((p) => p.id !== id);
-  const order = others.map((p) => p.id);
-  order.splice(others.filter((p) => p.x < x).length, 0, id);
+// Move participants freely (like flowchart nodes)
+export function moveParticipants(ids: string[], dx: number, dy: number) {
+  const { layout, overrides } = S();
   const ov = cloneOverrides(overrides);
-  const gap = (pid: string, value: number | undefined) => {
-    ov.participants[pid] = { ...ov.participants[pid], gap: value };
-    if (value === undefined) delete ov.participants[pid].gap;
-  };
-  if (order.every((pid, i) => pid === ps[i].id)) {
-    const prev = ps[cur.index - 1];
-    const next = ps[cur.index + 1];
-    // Stop at neighbours
-    x = clampParticipantX(layout, id, x);
-    if (prev) gap(id, Math.round(x - prev.x));
-    if (next) gap(next.id, Math.round(next.x - x));
-    return S().setOverrides(ov);
+  const o = overrides.origin ?? { x: 0, y: 0 };
+  for (const id of ids) {
+    const p = layout.participants.find((q) => q.id === id);
+    if (!p) continue;
+    const stretch = Math.round((overrides.participants[id]?.stretch ?? 0) + dy);
+    ov.participants[id] = { ...ov.participants[id], x: Math.round(p.x + dx - o.x), y: Math.round(p.top + dy - o.y), stretch };
+    if (!stretch) delete ov.participants[id].stretch;
   }
-  // Reset spacing
-  const oldNext = ps[cur.index + 1];
-  const newNext = order[order.indexOf(id) + 1];
-  [id, oldNext?.id, newNext].forEach((pid) => pid && gap(pid, undefined));
-  S().commit(reorderParticipants(doc, order), { overrides: ov, select: { kind: 'participant', id } });
+  S().setOverrides(ov);
+}
+
+// Lengthen or shorten a lifeline
+export function stretchLifeline(id: string, dy: number) {
+  const { layout, overrides } = S();
+  const p = layout.participants.find((q) => q.id === id);
+  if (!p) return;
+  const ov = cloneOverrides(overrides);
+  const cur = overrides.participants[id]?.stretch ?? 0;
+  // Auto length without the stretch
+  const auto = p.bottom - cur;
+  const stretch = Math.round(Math.max(p.bottom + dy, p.top + p.height + 20) - auto);
+  ov.participants[id] = { ...ov.participants[id], stretch };
+  if (!stretch) delete ov.participants[id].stretch;
+  S().setOverrides(ov);
+}
+
+// Move the whole diagram
+export function moveDiagram(dx: number, dy: number) {
+  const ov = cloneOverrides(S().overrides);
+  const o = ov.origin ?? { x: 0, y: 0 };
+  ov.origin = { x: Math.round(o.x + dx), y: Math.round(o.y + dy) };
+  if (!ov.origin.x && !ov.origin.y) delete ov.origin;
+  S().setOverrides(ov);
+}
+
+export function resetParticipantPosition(id: string) {
+  const ov = cloneOverrides(S().overrides);
+  const { width, height } = ov.participants[id] ?? {};
+  ov.participants[id] = {};
+  if (width !== undefined) ov.participants[id].width = width;
+  if (height !== undefined) ov.participants[id].height = height;
+  S().setOverrides(ov);
 }
 
 export function resizeParticipant(id: string, width: number, height: number) {
@@ -164,8 +181,8 @@ export function resizeParticipant(id: string, width: number, height: number) {
 
 export function resetParticipantSize(id: string) {
   const ov = cloneOverrides(S().overrides);
-  const { gap } = ov.participants[id] ?? {};
-  ov.participants[id] = gap !== undefined ? { gap } : {};
+  const { width: _w, height: _h, ...rest } = ov.participants[id] ?? {};
+  ov.participants[id] = rest;
   S().setOverrides(ov);
 }
 

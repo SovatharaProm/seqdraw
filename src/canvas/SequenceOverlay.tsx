@@ -1,8 +1,7 @@
 // Sequence diagram canvas overlays
-import { clampParticipantX, dropLine, nearestParticipant, type Layout } from '../core/layout';
-import { FONT_FAMILY, FONT_SIZE } from '../core/measure';
+import { dropLine, nearestParticipant, participantBottom, type Layout } from '../core/layout';
 import type { Theme } from '../core/themes';
-import { selfPath, StatementShape } from '../render/DiagramSvg';
+import { ParticipantShape, selfPath, StatementShape } from '../render/DiagramSvg';
 import * as actions from '../state/actions';
 import type { Selection } from '../state/store';
 import type { Drag } from './types';
@@ -23,6 +22,9 @@ export function SelectionOverlay({ layout, selection, k }: { layout: Layout; sel
         <rect x={x - pad} y={p.bottom - pad} width={p.width + pad * 2} height={p.height + pad * 2} rx={4} {...style} />
         <rect data-handle="resize" x={x + p.width - hs / 2} y={p.top + p.height - hs / 2} width={hs} height={hs} fill="white" stroke="var(--accent)" strokeWidth={sw} style={{ cursor: 'nwse-resize' }}>
           <title>Drag to resize</title>
+        </rect>
+        <rect data-handle="stretch" x={p.x - hs} y={p.bottom + p.height - hs / 2} width={hs * 2} height={hs} rx={hs / 2} fill="var(--accent)" stroke="white" strokeWidth={sw} style={{ cursor: 'ns-resize' }}>
+          <title>Drag up or down to change the lifeline length</title>
         </rect>
       </g>
     );
@@ -53,18 +55,59 @@ export function SelectionOverlay({ layout, selection, k }: { layout: Layout; sel
   return f ? <rect x={f.x1 - pad} y={f.y1 - pad} width={f.x2 - f.x1 + pad * 2} height={f.y2 - f.y1 + pad * 2} rx={3} {...style} strokeDasharray={`${6 / k} ${4 / k}`} /> : null;
 }
 
+// Snap lifelines and header rows to other participants
+const SNAP = 8;
+export function alignParticipant(layout: Layout, id: string, dx: number, dy: number, k: number): { dx: number; dy: number; guideX?: number; guideY?: number } {
+  const p = layout.participants.find((q) => q.id === id);
+  if (!p) return { dx, dy };
+  const x = p.x + dx;
+  const y = p.top + dy;
+  let bestX: number | undefined;
+  let bestY: number | undefined;
+  for (const q of layout.participants) {
+    if (q.id === id) continue;
+    if (Math.abs(q.x - x) < SNAP / k && (bestX === undefined || Math.abs(q.x - x) < Math.abs(bestX - x))) bestX = q.x;
+    if (Math.abs(q.top - y) < SNAP / k && (bestY === undefined || Math.abs(q.top - y) < Math.abs(bestY - y))) bestY = q.top;
+  }
+  return { dx: bestX !== undefined ? bestX - p.x : dx, dy: bestY !== undefined ? bestY - p.top : dy, guideX: bestX, guideY: bestY };
+}
+
 export function DragOverlay({ drag: d, layout, theme, k, end }: { drag: Drag; layout: Layout; theme: Theme; k: number; end: number }) {
   const accent = 'var(--accent)';
   const sw = 2 / k;
   const none = { pointerEvents: 'none' as const };
   if (d.type === 'participant' && d.moved) {
-    const p = layout.participants.find((q) => q.id === d.id)!;
-    const x = clampParticipantX(layout, d.id, d.origX + d.dx);
+    const b = layout.bounds;
+    const dash = `${4 / k} ${3 / k}`;
     return (
-      <g style={none} opacity={0.75}>
-        <rect x={x - p.width / 2} y={p.top} width={p.width} height={p.height} rx={3} fill="var(--accent-soft)" stroke={accent} strokeWidth={sw} strokeDasharray={`${6 / k} ${4 / k}`} />
-        <line x1={x} x2={x} y1={p.top + p.height} y2={p.bottom} stroke={accent} strokeWidth={sw} strokeDasharray={`${4 / k} ${4 / k}`} />
-        <text x={x} y={p.top + p.height / 2 + 5} textAnchor="middle" fontFamily={FONT_FAMILY} fontSize={FONT_SIZE} fill="var(--text)">{p.label}</text>
+      <g style={none}>
+        {d.guideX !== undefined && <line x1={d.guideX} x2={d.guideX} y1={b.y} y2={b.y + b.height} stroke={accent} strokeWidth={1 / k} strokeDasharray={dash} />}
+        {d.guideY !== undefined && <line x1={b.x} x2={b.x + b.width} y1={d.guideY} y2={d.guideY} stroke={accent} strokeWidth={1 / k} strokeDasharray={dash} />}
+        {layout.participants.filter((q) => d.ids.includes(q.id)).map((q) => {
+          const top = q.top + d.dy;
+          const p = { ...q, x: q.x + d.dx, bottom: participantBottom(q.bottom + d.dy, q.height, top) };
+          return (
+            <g key={q.id} opacity={0.8}>
+              <line x1={p.x} x2={p.x} y1={top + p.height} y2={p.bottom} stroke={accent} strokeWidth={sw} strokeDasharray={dash} />
+              <ParticipantShape p={p} y={top} t={theme} />
+              <ParticipantShape p={p} y={p.bottom} t={theme} />
+              <rect x={p.x - p.width / 2 - 4} y={top - 4} width={p.width + 8} height={p.height + 8} rx={4} fill="none" stroke={accent} strokeWidth={sw} strokeDasharray={dash} />
+            </g>
+          );
+        })}
+      </g>
+    );
+  }
+  if (d.type === 'stretch' && d.moved) {
+    const q = layout.participants.find((r) => r.id === d.id);
+    if (!q) return null;
+    const bottom = Math.max(q.bottom + d.dy, q.top + q.height + 20);
+    const dash = `${4 / k} ${3 / k}`;
+    return (
+      <g style={none} opacity={0.8}>
+        <line x1={q.x} x2={q.x} y1={q.top + q.height} y2={bottom} stroke={accent} strokeWidth={sw} strokeDasharray={dash} />
+        <ParticipantShape p={q} y={bottom} t={theme} />
+        <rect x={q.x - q.width / 2 - 4} y={bottom - 4} width={q.width + 8} height={q.height + 8} rx={4} fill="none" stroke={accent} strokeWidth={sw} strokeDasharray={dash} />
       </g>
     );
   }
@@ -106,7 +149,7 @@ export function DragOverlay({ drag: d, layout, theme, k, end }: { drag: Drag; la
     const toY = d.type === 'connect' ? from.y : d.to.y;
     return (
       <g style={none}>
-        {snap && <line x1={snap.x} x2={snap.x} y1={layout.lifelineTop} y2={layout.lifelineBottom} stroke={accent} strokeWidth={4 / k} opacity={0.25} />}
+        {snap && <line x1={snap.x} x2={snap.x} y1={snap.top + snap.height} y2={snap.bottom} stroke={accent} strokeWidth={4 / k} opacity={0.25} />}
         <line x1={from.x} y1={from.y} x2={toX} y2={toY} stroke={accent} strokeWidth={sw} strokeDasharray={`${6 / k} ${4 / k}`} />
         <circle cx={toX} cy={toY} r={5 / k} fill={accent} />
       </g>
