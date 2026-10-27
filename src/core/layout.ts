@@ -339,3 +339,23 @@ export function nearestParticipant(layout: Layout, x: number): LParticipant | un
   for (const p of layout.participants) if (!best || Math.abs(p.x - x) < Math.abs(best.x - x)) best = p;
   return best;
 }
+
+// Snap lifelines and header rows to other participants
+const SNAP = 8;
+export function alignParticipant(layout: Layout, id: string, dx: number, dy: number, k: number): { dx: number; dy: number; guideX?: number; guideY?: number } {
+  const p = layout.participants.find((q) => q.id === id);
+  if (!p) return { dx, dy };
+  const x = p.x + dx;
+  const y = p.top + dy;
+  let bestX: number | undefined;
+  let bestY: number | undefined;
+  for (const q of layout.participants) {
+    if (q.id === id) continue;
+    if (Math.abs(q.x - x) < SNAP / k && (bestX === undefined || Math.abs(q.x - x) < Math.abs(bestX - x))) bestX = q.x;
+    if (Math.abs(q.top - y) < SNAP / k && (bestY === undefined || Math.abs(q.top - y) < Math.abs(bestY - y))) bestY = q.top;
+  }
+  return { dx: bestX !== undefined ? bestX - p.x : dx, dy: bestY !== undefined ? bestY - p.top : dy, guideX: bestX, guideY: bestY };
+}
+
+// Self-message loop
+export const selfPath = (x1: number, y: number, x2: number) => `M${x1} ${y} C${x1 + SELF_W * 1.2} ${y - 6}, ${x1 + SELF_W * 1.2} ${y + 34}, ${x2} ${y + 28}`;

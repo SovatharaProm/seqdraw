@@ -15,7 +15,7 @@ import { Swatch, THEME_GROUPS } from './ThemeBadge';
 import { APPEARANCES } from './Toolbar';
 import { useUi } from './uiState';
 
-const BLOCKS: PaletteItem[] = ['loop', 'alt', 'opt', 'par', 'critical', 'break'];
+const BLOCKS = ['loop', 'alt', 'opt', 'par', 'critical', 'break'] as const satisfies readonly PaletteItem[];
 
 // Command palette
 export function CommandPalette() {
