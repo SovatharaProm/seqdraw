@@ -6,7 +6,7 @@ type Chain = FlowStatement & { type: 'chain' };
 
 const fresh = (stmt: FlowStatement): FlowLine => ({ raw: null, indent: '', stmt });
 
-export const defaultLink = (): Link => ({ stroke: 'normal', start: 'none', end: 'arrow', length: 1 });
+const defaultLink = (): Link => ({ stroke: 'normal', start: 'none', end: 'arrow', length: 1 });
 
 type Mapped = FlowStatement | FlowStatement[] | null;
 const list = (m: Mapped): FlowStatement[] => (m ? (Array.isArray(m) ? m : [m]) : []);
@@ -30,7 +30,7 @@ function mapLine(lines: FlowLine[], i: number, part: number, fn: (s: FlowStateme
 const partsOf = (s: FlowStatement): FlowStatement[] => (s.type === 'multi' ? s.parts : [s]);
 
 // Content end
-export function flowContentEnd(lines: FlowLine[]): number {
+function flowContentEnd(lines: FlowLine[]): number {
   let i = lines.length;
   while (i > 0 && lines[i - 1].stmt.type === 'blank') i--;
   const header = lines.findIndex((l) => l.stmt.type === 'header');
@@ -119,9 +119,9 @@ export function setNodeShape(doc: FlowDoc, id: string, shape: FlowShape): FlowLi
   return patchRef(doc, id, (r) => bracket(r, { shape, text: r.text ?? n.label }));
 }
 
-export function addNode(doc: FlowDoc, shape: FlowShape, label: string, opts: { subgraph?: string; from?: string } = {}): { lines: FlowLine[]; id: string; line: number } {
+export function addNode(doc: FlowDoc, shape: FlowShape, label: string, opts: { subgraph?: string; from?: string; classes?: string[] } = {}): { lines: FlowLine[]; id: string; line: number } {
   const id = uniqueNodeId(doc);
-  const ref: NodeRef = { id, shape, text: label };
+  const ref: NodeRef = { id, shape, text: label, ...(opts.classes?.length ? { classes: opts.classes.slice(0, 1) } : {}) };
   const stmt: FlowStatement = opts.from ? { type: 'chain', groups: [[{ id: opts.from }], [ref]], links: [defaultLink()] } : { type: 'chain', groups: [[ref]], links: [] };
   const line = flowInsertLine(doc, opts.subgraph);
   return { lines: insertAt(doc.lines, line, [stmt]), id, line };

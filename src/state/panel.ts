@@ -1,7 +1,7 @@
-// Code panel state
+// Code panel and canvas bar state
 import { create } from 'zustand';
-import { requestFit } from '../canvas/Canvas';
-import { readBool, readNumber, writeBool, writeString } from '../lib/storage';
+import { requestFit } from '../lib/fit';
+import { readBool, readNumber, readString, writeBool, writeString } from '../lib/storage';
 import { useStore } from './store';
 
 export const CODE_SIZE = 13;
@@ -10,6 +10,8 @@ export const SPLIT = 34;
 const SPLIT_RANGE = [15, 80] as const;
 
 const clamp = (n: number, [lo, hi]: readonly [number, number]) => Math.min(hi, Math.max(lo, n));
+
+export type BarPosition = 'top' | 'bottom';
 
 interface PanelState {
   open: boolean;
@@ -23,6 +25,9 @@ interface PanelState {
   setGetCode(open: boolean): void;
   setSize(size: number): void;
   setSplit(split: number, persist?: boolean): void;
+  // Hand / zoom bar on the canvas
+  zoomBar: BarPosition;
+  setZoomBar(pos: BarPosition): void;
 }
 
 export const usePanel = create<PanelState>((set) => ({
@@ -30,6 +35,11 @@ export const usePanel = create<PanelState>((set) => ({
   getCode: false,
   size: clamp(Math.round(readNumber('codeSize', CODE_SIZE)), CODE_SIZE_RANGE),
   split: clamp(readNumber('codeSplit', SPLIT), SPLIT_RANGE),
+  zoomBar: readString('zoomBar') === 'bottom' ? 'bottom' : 'top',
+  setZoomBar(zoomBar) {
+    set({ zoomBar });
+    writeString('zoomBar', zoomBar);
+  },
   setOpen(open) {
     if (!open) useStore.getState().flush();
     set({ open, getCode: false });

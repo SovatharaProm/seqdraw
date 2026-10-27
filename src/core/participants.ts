@@ -12,17 +12,26 @@ export interface ParticipantShapeDef {
   height: number;
   // Icon with label below
   icon: boolean;
+  // Palette group
+  group: ParticipantGroup;
 }
 
+// Palette groups, in dock order
+export const PARTICIPANT_GROUPS = [
+  { id: 'participants', name: 'Participants' },
+  { id: 'data', name: 'Data stores' },
+] as const;
+export type ParticipantGroup = (typeof PARTICIPANT_GROUPS)[number]['id'];
+
 export const PARTICIPANT_SHAPES: readonly ParticipantShapeDef[] = [
-  { kind: 'participant', name: 'Participant', hint: 'A system or service', defaultLabel: 'Service', height: 50, icon: false },
-  { kind: 'actor', name: 'Actor', hint: 'A person', defaultLabel: 'User', height: 75, icon: true },
-  { kind: 'database', name: 'Database', hint: 'A data store', defaultLabel: 'Database', height: 64, icon: false },
-  { kind: 'boundary', name: 'Boundary', hint: 'A system boundary, such as a UI or API', defaultLabel: 'Boundary', height: 75, icon: true },
-  { kind: 'control', name: 'Control', hint: 'A controller that coordinates logic', defaultLabel: 'Controller', height: 75, icon: true },
-  { kind: 'entity', name: 'Entity', hint: 'A domain object', defaultLabel: 'Entity', height: 75, icon: true },
-  { kind: 'collections', name: 'Collections', hint: 'A set of instances', defaultLabel: 'Collection', height: 56, icon: false },
-  { kind: 'queue', name: 'Queue', hint: 'A message queue', defaultLabel: 'Queue', height: 50, icon: false },
+  { kind: 'participant', name: 'Participant', hint: 'A system or service', defaultLabel: 'Service', height: 50, icon: false, group: 'participants' },
+  { kind: 'actor', name: 'Actor', hint: 'A person', defaultLabel: 'User', height: 75, icon: true, group: 'participants' },
+  { kind: 'database', name: 'Database', hint: 'A data store', defaultLabel: 'Database', height: 64, icon: false, group: 'data' },
+  { kind: 'boundary', name: 'Boundary', hint: 'A system boundary, such as a UI or API', defaultLabel: 'Boundary', height: 75, icon: true, group: 'participants' },
+  { kind: 'control', name: 'Control', hint: 'A controller that coordinates logic', defaultLabel: 'Controller', height: 75, icon: true, group: 'participants' },
+  { kind: 'entity', name: 'Entity', hint: 'A domain object', defaultLabel: 'Entity', height: 75, icon: true, group: 'participants' },
+  { kind: 'collections', name: 'Collections', hint: 'A set of instances', defaultLabel: 'Collection', height: 56, icon: false, group: 'data' },
+  { kind: 'queue', name: 'Queue', hint: 'A message queue', defaultLabel: 'Queue', height: 50, icon: false, group: 'data' },
 ];
 
 const BY_KIND = Object.fromEntries(PARTICIPANT_SHAPES.map((d) => [d.kind, d])) as Record<ParticipantKind, ParticipantShapeDef>;

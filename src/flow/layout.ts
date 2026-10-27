@@ -1,7 +1,8 @@
-// Flowchart layout (dagre, as in Mermaid)
+// Flowchart layout (dagre, as in Mermaid; ELK positions when `auto` is given)
 import dagre from '@dagrejs/dagre';
 import { LINE_HEIGHT, measureText, splitLines, type Measure } from '../core/measure';
 import type { FlowDoc, FlowShape, Link, Side } from './model';
+import type { AutoLayout } from './elk';
 import { flowShapeOf, isFreeEnd } from './shapes';
 
 export type Pt = { x: number; y: number };
@@ -35,8 +36,17 @@ export interface FEdge {
   // Pinned sides
   fromSide?: Side;
   toSide?: Side;
+  // Place along the pinned sides (0..1)
+  fromAt?: number;
+  toAt?: number;
+  // Hand-made route
+  route?: Pt[];
   // Orthogonal route
   ortho?: boolean;
+  // How the link is drawn
+  shape: LineShape;
+  // Straight / curved bend points
+  bends?: Pt[];
   line: number;
   from: string;
   to: string;
@@ -67,7 +77,23 @@ export interface FlowLayout {
 }
 
 export type NodePositions = Record<string, { x: number; y: number }>;
-export type EdgePorts = Record<string, { from?: Side; to?: Side }>;
+// Link drawing
+export type LineShape = 'auto' | 'ortho' | 'straight' | 'curved';
+
+// Pinned link ends, style and bends
+export interface EdgePort {
+  from?: Side;
+  to?: Side;
+  fromAt?: number;
+  toAt?: number;
+  // Orthogonal: inner bend points
+  route?: Pt[];
+  // Line style (auto when unset)
+  shape?: Exclude<LineShape, 'auto'>;
+  // Straight / curved: free bend points
+  points?: Pt[];
+}
+export type EdgePorts = Record<string, EdgePort>;
 
 const STUB = 22;
 // Gap for placing new nodes
@@ -80,20 +106,84 @@ type Box = { x: number; y: number; width: number; height: number };
 // Side midpoint
 export const portPoint = (n: Box, side: Side): Pt => ({ x: n.x + (NORMAL[side].x * n.width) / 2, y: n.y + (NORMAL[side].y * n.height) / 2 });
 
-// Side closest to a point
-export function nearestSide(n: Box, p: Pt): Side {
-  let best: Side = 'top';
-  let dist = Infinity;
-  for (const s of SIDES) {
-    const q = portPoint(n, s);
-    const d = Math.hypot(q.x - p.x, q.y - p.y);
-    if (d < dist) [best, dist] = [s, d];
+const MID = 0.5;
+
+// Point at `at` along a side, on the shape's outline
+export function sidePoint(n: Box & { shape: FlowShape }, side: Side, at = MID): Pt {
+  if (Math.abs(at - MID) < 1e-6) return portPoint(n, side);
+  const along = side === 'top' || side === 'bottom';
+  const p = along ? { x: n.x - n.width / 2 + at * n.width, y: portPoint(n, side).y } : { x: portPoint(n, side).x, y: n.y - n.height / 2 + at * n.height };
+  const out = { x: p.x + NORMAL[side].x * 10, y: p.y + NORMAL[side].y * 10 };
+  return clipAlong(n, p, out);
+}
+
+// Spot along a side (0..1), middle within `snap` px
+export function sideAt(n: Box, side: Side, p: Pt, snap = 0): number {
+  const along = side === 'top' || side === 'bottom';
+  const len = Math.max(1, along ? n.width : n.height);
+  const off = along ? p.x - (n.x - n.width / 2) : p.y - (n.y - n.height / 2);
+  if (Math.abs(off - len / 2) <= snap) return MID;
+  return Math.round((Math.min(len, Math.max(0, off)) / len) * 1e4) / 1e4;
+}
+
+// Route through hand-made bends
+export function fitRoute(a: Pt, sa: Side, route: Pt[], b: Pt, sb: Side): Pt[] {
+  const inner = route.map((p) => ({ ...p }));
+  if (!inner.length) return [a, b];
+  // Aligned bends follow their end
+  const follow = (pts: Pt[], end: Pt, side: Side) => {
+    const axis = side === 'top' || side === 'bottom' ? 'x' : 'y';
+    const v = pts[0][axis];
+    for (const p of pts) {
+      if (Math.abs(p[axis] - v) >= 1) break;
+      p[axis] = end[axis];
+    }
+  };
+  follow(inner, a, sa);
+  follow(inner.slice().reverse(), b, sb);
+  return dedupe([a, ...inner, b]);
+}
+
+// Drop repeated and collinear points
+function dedupe(pts: Pt[]): Pt[] {
+  const out: Pt[] = [];
+  for (const p of pts) {
+    const q = out[out.length - 1];
+    if (q && Math.abs(q.x - p.x) < 1 && Math.abs(q.y - p.y) < 1) continue;
+    const r = out[out.length - 2];
+    if (q && r && ((Math.abs(r.x - q.x) < 1 && Math.abs(q.x - p.x) < 1) || (Math.abs(r.y - q.y) < 1 && Math.abs(q.y - p.y) < 1))) out.pop();
+    out.push(p);
   }
-  return best;
+  return out;
+}
+
+// Route with end stubs (editable)
+export function editableRoute(pts: Pt[], sa: Side, sb: Side): Pt[] {
+  if (pts.length < 2) return pts;
+  const a = pts[0];
+  const b = pts[pts.length - 1];
+  const stub = (p: Pt, s: Side) => ({ x: p.x + NORMAL[s].x * STUB, y: p.y + NORMAL[s].y * STUB });
+  const inner = pts.slice(1, -1);
+  const s1 = stub(a, sa);
+  const s2 = stub(b, sb);
+  const near = (p: Pt | undefined, q: Pt) => p && Math.abs(p.x - q.x) < 0.5 && Math.abs(p.y - q.y) < 0.5;
+  // End stubs
+  const head = near(inner[0], s1) ? [] : [s1];
+  const tail = near(inner[inner.length - 1], s2) ? [] : [s2];
+  const out = [a, ...head, ...inner, ...tail, b];
+  // Square off any diagonal hop
+  const sq: Pt[] = [out[0]];
+  for (let i = 1; i < out.length; i++) {
+    const p = sq[sq.length - 1];
+    const q = out[i];
+    if (Math.abs(p.x - q.x) > 0.5 && Math.abs(p.y - q.y) > 0.5) sq.push(i === out.length - 1 ? { x: p.x, y: q.y } : { x: q.x, y: p.y });
+    sq.push(q);
+  }
+  return sq;
 }
 
 // Side facing a point
-function facingSide(n: Box, p: Pt): Side {
+export function facingSide(n: Box, p: Pt): Side {
   const dx = (p.x - n.x) / Math.max(1, n.width);
   const dy = (p.y - n.y) / Math.max(1, n.height);
   return Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 'right' : 'left') : dy > 0 ? 'bottom' : 'top';
@@ -143,7 +233,7 @@ export function orthoRoute(a: Pt, sa: Side, b: Pt, sb: Side): Pt[] {
 }
 
 // Point halfway along a polyline
-function midpoint(pts: Pt[]): Pt {
+export function midpoint(pts: Pt[]): Pt {
   const lens = pts.slice(1).map((p, i) => Math.hypot(p.x - pts[i].x, p.y - pts[i].y));
   let half = lens.reduce((s, l) => s + l, 0) / 2;
   for (let i = 0; i < lens.length; i++) {
@@ -161,7 +251,7 @@ const TITLE_H = 24;
 const CLUSTER_PAD = 16;
 
 // `fill:#f9f,stroke:#333`
-export function parseStyle(css: string | undefined, into: FlowStyle = {}): FlowStyle {
+function parseStyle(css: string | undefined, into: FlowStyle = {}): FlowStyle {
   for (const decl of (css ?? '').split(/[,;]/)) {
     const m = decl.match(/^\s*([\w-]+)\s*:\s*(.+?)\s*$/);
     if (!m) continue;
@@ -176,10 +266,50 @@ export function parseStyle(css: string | undefined, into: FlowStyle = {}): FlowS
 }
 
 // Label lines
-export const labelLines = (text: string) => splitLines(text.replace(/^`|`$/g, '').replace(/\*\*|__/g, ''));
+const labelLines = (text: string) => splitLines(text.replace(/^`|`$/g, '').replace(/\*\*|__/g, ''));
 
 const BLANK_W = 64;
 const blockSize = (lines: string[], measure: Measure) => ({ w: Math.max(0, ...lines.map((l) => measure(l))), h: lines.length * LINE_HEIGHT });
+
+// Inside the node's outline
+function inShape(n: { x: number; y: number; width: number; height: number; shape: FlowShape }, p: Pt): boolean {
+  const w = n.width / 2;
+  const h = n.height / 2;
+  const dx = p.x - n.x;
+  const dy = p.y - n.y;
+  if (Math.abs(dx) > w + 0.01 || Math.abs(dy) > h + 0.01) return false;
+  const def = flowShapeOf(n.shape);
+  if (def.round) return (dx / w) ** 2 + (dy / h) ** 2 <= 1.0001;
+  if (!def.polygon) return true;
+  const pts = def.polygon(n.width, n.height).map(([x, y]) => ({ x: x - w, y: y - h }));
+  let inside = false;
+  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+    const a = pts[i];
+    const b = pts[j];
+    if (a.y > dy !== b.y > dy && dx < ((b.x - a.x) * (dy - a.y)) / (b.y - a.y) + a.x) inside = !inside;
+  }
+  return inside;
+}
+
+// Slide a box point onto the outline
+function clipAlong(n: { x: number; y: number; width: number; height: number; shape: FlowShape }, end: Pt, prev: Pt): Pt {
+  const len = Math.hypot(end.x - prev.x, end.y - prev.y);
+  if (!len || inShape(n, end)) return end;
+  const d = { x: (end.x - prev.x) / len, y: (end.y - prev.y) / len };
+  const at = (t: number) => ({ x: end.x + d.x * t, y: end.y + d.y * t });
+  // First step inside, then refine
+  const max = n.width + n.height;
+  let hi = 2;
+  while (hi <= max && !inShape(n, at(hi))) hi += 2;
+  if (hi > max) return end;
+  let lo = hi - 2;
+  for (let i = 0; i < 16; i++) {
+    const mid = (lo + hi) / 2;
+    if (inShape(n, at(mid))) hi = mid;
+    else lo = mid;
+  }
+  return at(hi);
+}
 
 // Shape boundary point toward `p`
 export function clip(n: { x: number; y: number; width: number; height: number; shape: FlowShape }, p: Pt): Pt {
@@ -214,7 +344,7 @@ export function clip(n: { x: number; y: number; width: number; height: number; s
   return { x: n.x + dx * t, y: n.y + dy * t };
 }
 
-export function layoutFlow(doc: FlowDoc, positions: NodePositions, measure: Measure = measureText, ports: EdgePorts = {}): FlowLayout {
+export function layoutFlow(doc: FlowDoc, positions: NodePositions, measure: Measure = measureText, ports: EdgePorts = {}, auto?: AutoLayout): FlowLayout {
   // Ignore old offset entries
   const posOf = (id: string) => {
     const p = positions[id];
@@ -272,10 +402,24 @@ export function layoutFlow(doc: FlowDoc, positions: NodePositions, measure: Meas
     const name = String(e.index);
     g.setEdge(from, to, { minlen: e.spec.length, ...(label.length ? { width: t.w + 8, height: t.h + 4, labelpos: 'c' } : {}) }, name);
     const key = keys[e.index];
-    edges.push({ index: e.index, key, fromSide: ports[key]?.from, toSide: ports[key]?.to, line: e.line, from, to, spec: e.spec, points: [], label, style: parseStyle(e.style) });
+    edges.push({ index: e.index, key, fromSide: ports[key]?.from, toSide: ports[key]?.to, fromAt: ports[key]?.fromAt, toAt: ports[key]?.toAt, route: ports[key]?.route, shape: ports[key]?.shape ?? (ports[key]?.from || ports[key]?.to ? 'ortho' : 'auto'), bends: ports[key]?.points, line: e.line, from, to, spec: e.spec, points: [], label, style: parseStyle(e.style) });
   });
 
   dagre.layout(g);
+
+  // Adaptive: ELK positions and routes
+  if (auto) {
+    for (const n of nodes) if (auto.nodes[n.id]) Object.assign(g.node(n.id), auto.nodes[n.id]);
+    for (const s of doc.subgraphs) {
+      const c = auto.clusters[s.id];
+      if (c) Object.assign(g.node(s.id), { x: c.x + c.width / 2, y: c.y + c.height / 2, width: c.width, height: c.height });
+    }
+    for (const e of edges) {
+      const a = auto.edges[e.index];
+      const de = g.edge(e.from, e.to, String(e.index));
+      if (a && de) Object.assign(de, { points: a.points, x: a.label?.x, y: a.label?.y, elk: true });
+    }
+  }
 
   const byId = new Map(nodes.map((n) => [n.id, n]));
   // Shift from the auto position
@@ -373,13 +517,26 @@ export function layoutFlow(doc: FlowDoc, positions: NodePositions, measure: Meas
       pts = a === b ? pts : [{ x: a.x, y: a.y }, out(pa, sa), out(pb, sb), { x: b.x, y: b.y }];
       ({ x: lx, y: ly } = midpoint([pa, out(pa, sa), out(pb, sb), pb]));
     }
-    if (a && b && (e.fromSide || e.toSide)) {
-      // Pinned sides: orthogonal route
+    if (a && b && a !== b && (e.shape === 'straight' || e.shape === 'curved')) {
+      // Free bends
+      const bends = e.bends ?? [];
+      const start = e.fromSide ? sidePoint(a, e.fromSide, e.fromAt) : clip(a, bends[0] ?? (e.toSide ? sidePoint(b, e.toSide, e.toAt) : b));
+      const end = e.toSide ? sidePoint(b, e.toSide, e.toAt) : clip(b, bends[bends.length - 1] ?? start);
+      pts = [start, ...bends, end];
+      ({ x: lx, y: ly } = midpoint(pts));
+    } else if (a && b && a !== b && e.shape === 'ortho') {
+      // Right angles, around other nodes
       const sa = e.fromSide ?? facingSide(a, e.toSide ? portPoint(b, e.toSide) : b);
       const sb = e.toSide ?? facingSide(b, portPoint(a, sa));
-      pts = orthoRoute(portPoint(a, sa), sa, portPoint(b, sb), sb);
+      const pa = sidePoint(a, sa, e.fromAt);
+      const pb = sidePoint(b, sb, e.toAt);
+      pts = e.route?.length ? fitRoute(pa, sa, e.route, pb, sb) : routeAround(pa, sa, pb, sb, obstacles(nodes, a, b));
       e.ortho = true;
       ({ x: lx, y: ly } = midpoint(pts));
+    } else if (a && b && same && de?.elk && pts.length >= 2) {
+      // ELK route, ends on the outline
+      e.ortho = true;
+      pts = [clipAlong(a, pts[0], pts[1]), ...pts.slice(1, -1), clipAlong(b, pts[pts.length - 1], pts[pts.length - 2])];
     } else if (a && b && pts.length >= 2) {
       const inner = pts.slice(1, -1);
       const start = clip(a, inner[0] ?? b);
@@ -479,4 +636,158 @@ export function clusterAt(layout: FlowLayout, p: Pt): FCluster | undefined {
     if (p.x >= c.x && p.x <= c.x + c.width && p.y >= c.y && p.y <= c.y + c.height && (!best || c.depth > best.depth)) best = c;
   }
   return best;
+}
+
+// Link sides
+function edgeSides(L: FlowLayout, e: FEdge): [Side, Side] | null {
+  const a = L.nodes.find((n) => n.id === e.from);
+  const b = L.nodes.find((n) => n.id === e.to);
+  if (!a || !b || e.points.length < 2) return null;
+  return [e.fromSide ?? facingSide(a, e.points[0]), e.toSide ?? facingSide(b, e.points[e.points.length - 1])];
+}
+
+// Move one segment (stubs stay)
+export function movedRoute(d: { pts: Pt[]; seg: number; axis: 'x' | 'y'; delta: number }): Pt[] {
+  const pts = d.pts.slice();
+  let seg = d.seg;
+  if (seg === 1) {
+    pts.splice(1, 0, { ...pts[1] });
+    seg++;
+  }
+  if (seg + 1 === pts.length - 2) pts.splice(seg + 2, 0, { ...pts[seg + 1] });
+  return pts.map((q, i) => (i === seg || i === seg + 1 ? { ...q, [d.axis]: q[d.axis] + d.delta } : q));
+}
+
+// Editable right-angle route
+export function editableEdge(L: FlowLayout, e: FEdge): { pts: Pt[]; sides: [Side, Side] } | null {
+  const a = L.nodes.find((n) => n.id === e.from);
+  const b = L.nodes.find((n) => n.id === e.to);
+  if (!a || !b || a === b || e.points.length < 2) return null;
+  if (e.ortho) {
+    const sides = edgeSides(L, e)!;
+    return { pts: editableRoute(e.points, sides[0], sides[1]), sides };
+  }
+  // Sides the curve uses
+  const sides: [Side, Side] = [facingSide(a, e.points[0]), facingSide(b, e.points[e.points.length - 1])];
+  const route = orthoRoute(sidePoint(a, sides[0]), sides[0], sidePoint(b, sides[1]), sides[1]);
+  return { pts: editableRoute(route, sides[0], sides[1]), sides };
+}
+
+// Middle draggable segment of a route
+export const middleSegment = (pts: Pt[]) => Math.max(1, Math.floor((pts.length - 2) / 2));
+
+// Nodes to route around
+const obstacles = (nodes: FNode[], a: FNode, b: FNode): Box[] => nodes.filter((n) => n !== a && n !== b && !isFreeEnd({ shape: n.shape, label: n.label.join('') }));
+
+const CLEAR = 12;
+const BEND_COST = 40;
+const MAX_OBSTACLES = 400;
+const ROUTE_WINDOW = 300;
+
+// Binary heap of [cost, state]
+class MinHeap {
+  private a: [number, number][] = [];
+  get size() {
+    return this.a.length;
+  }
+  push(cost: number, v: number) {
+    const a = this.a;
+    a.push([cost, v]);
+    for (let i = a.length - 1; i > 0; ) {
+      const p = (i - 1) >> 1;
+      if (a[p][0] <= a[i][0]) break;
+      [a[p], a[i]] = [a[i], a[p]];
+      i = p;
+    }
+  }
+  pop(): [number, number] {
+    const a = this.a;
+    const top = a[0];
+    const last = a.pop()!;
+    if (a.length) {
+      a[0] = last;
+      for (let i = 0; ; ) {
+        const l = 2 * i + 1, r = l + 1;
+        let m = i;
+        if (l < a.length && a[l][0] < a[m][0]) m = l;
+        if (r < a.length && a[r][0] < a[m][0]) m = r;
+        if (m === i) break;
+        [a[m], a[i]] = [a[i], a[m]];
+        i = m;
+      }
+    }
+    return top;
+  }
+}
+
+type Rect = { x1: number; y1: number; x2: number; y2: number };
+const padded = (n: Box): Rect => ({ x1: n.x - n.width / 2 - CLEAR, y1: n.y - n.height / 2 - CLEAR, x2: n.x + n.width / 2 + CLEAR, y2: n.y + n.height / 2 + CLEAR });
+
+// Segment crosses a rectangle's inside
+function blocked(p: Pt, q: Pt, rects: Rect[]): boolean {
+  const [x1, x2] = p.x < q.x ? [p.x, q.x] : [q.x, p.x];
+  const [y1, y2] = p.y < q.y ? [p.y, q.y] : [q.y, p.y];
+  return rects.some((r) => x1 < r.x2 && x2 > r.x1 && y1 < r.y2 && y2 > r.y1);
+}
+const pathBlocked = (pts: Pt[], rects: Rect[]) => pts.some((p, i) => i > 0 && blocked(pts[i - 1], p, rects));
+
+// Orthogonal route around nodes
+export function routeAround(a: Pt, sa: Side, b: Pt, sb: Side, others: Box[]): Pt[] {
+  const direct = orthoRoute(a, sa, b, sb);
+  if (!others.length || others.length > MAX_OBSTACLES) return direct;
+  const s1 = { x: a.x + NORMAL[sa].x * STUB, y: a.y + NORMAL[sa].y * STUB };
+  const s2 = { x: b.x + NORMAL[sb].x * STUB, y: b.y + NORMAL[sb].y * STUB };
+  // Only nodes near the link matter
+  const win = { x1: Math.min(s1.x, s2.x) - ROUTE_WINDOW, y1: Math.min(s1.y, s2.y) - ROUTE_WINDOW, x2: Math.max(s1.x, s2.x) + ROUTE_WINDOW, y2: Math.max(s1.y, s2.y) + ROUTE_WINDOW };
+  const rects = others.map(padded).filter((r) => r.x2 > win.x1 && r.x1 < win.x2 && r.y2 > win.y1 && r.y1 < win.y2);
+  if (!pathBlocked(direct, rects)) return direct;
+  // Grid lines: stubs, middle, node edges
+  const xs = [...new Set([s1.x, s2.x, (s1.x + s2.x) / 2, ...rects.flatMap((r) => [r.x1, r.x2])])].sort((m, n) => m - n);
+  const ys = [...new Set([s1.y, s2.y, (s1.y + s2.y) / 2, ...rects.flatMap((r) => [r.y1, r.y2])])].sort((m, n) => m - n);
+  const inside = (x: number, y: number) => rects.some((r) => x > r.x1 && x < r.x2 && y > r.y1 && y < r.y2);
+  const key = (i: number, j: number) => i * ys.length + j;
+  const si = xs.indexOf(s1.x), sj = ys.indexOf(s1.y), ti = xs.indexOf(s2.x), tj = ys.indexOf(s2.y);
+  // Dijkstra on (cell, heading 0=h 1=v)
+  const start0 = NORMAL[sa].x !== 0 ? 0 : 1;
+  const dist = new Map<number, number>();
+  const prev = new Map<number, number>();
+  const open = new MinHeap();
+  open.push(0, key(si, sj) * 2 + start0);
+  dist.set(key(si, sj) * 2 + start0, 0);
+  const endState = new Set([key(ti, tj) * 2, key(ti, tj) * 2 + 1]);
+  let found = -1;
+  while (open.size) {
+    const [d, st] = open.pop();
+    if (d > (dist.get(st) ?? Infinity)) continue;
+    if (endState.has(st)) {
+      found = st;
+      break;
+    }
+    const cell = st >> 1;
+    const heading = st & 1;
+    const i = Math.floor(cell / ys.length);
+    const j = cell % ys.length;
+    for (const [di, dj] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      const ni = i + di, nj = j + dj;
+      if (ni < 0 || nj < 0 || ni >= xs.length || nj >= ys.length) continue;
+      const p = { x: xs[i], y: ys[j] };
+      const q = { x: xs[ni], y: ys[nj] };
+      if (inside(q.x, q.y) || blocked(p, q, rects)) continue;
+      const h = di !== 0 ? 0 : 1;
+      const nd = d + Math.abs(q.x - p.x) + Math.abs(q.y - p.y) + (h !== heading ? BEND_COST : 0);
+      const ns = key(ni, nj) * 2 + h;
+      if (nd < (dist.get(ns) ?? Infinity)) {
+        dist.set(ns, nd);
+        prev.set(ns, st);
+        open.push(nd, ns);
+      }
+    }
+  }
+  if (found < 0) return direct;
+  const cells: Pt[] = [];
+  for (let st: number | undefined = found; st !== undefined; st = prev.get(st)) {
+    const cell = st >> 1;
+    cells.unshift({ x: xs[Math.floor(cell / ys.length)], y: ys[cell % ys.length] });
+  }
+  return dedupe([a, ...cells, b]);
 }

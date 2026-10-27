@@ -1,13 +1,14 @@
 // Browser storage (fails quietly: private mode, blocked storage)
 
 // Storage keys
-export const STORAGE_KEYS = {
+const STORAGE_KEYS = {
   draft: 'seqdraw.draft.v1',
   appearance: 'seqdraw.appearance',
   autoUpdate: 'seqdraw.autoUpdate',
   codeOpen: 'seqdraw.code.open',
   codeSize: 'seqdraw.code.size',
   codeSplit: 'seqdraw.code.split',
+  zoomBar: 'seqdraw.zoomBar',
 } as const;
 
 export type StorageKey = keyof typeof STORAGE_KEYS;

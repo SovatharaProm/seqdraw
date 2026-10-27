@@ -40,7 +40,7 @@ export function TextField({ value, onCommit, multiline, label }: { value: string
 }
 
 // Typed select over an option list
-export function Select<T extends string | number>({ value, options, onChange, label, disabled }: { value: T; options: readonly Option<T>[]; onChange: (v: T) => void; label?: string; disabled?: boolean }) {
+function Select<T extends string | number>({ value, options, onChange, label, disabled }: { value: T; options: readonly Option<T>[]; onChange: (v: T) => void; label?: string; disabled?: boolean }) {
   return (
     <select
       value={value}

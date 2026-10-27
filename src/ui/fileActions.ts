@@ -1,21 +1,15 @@
-import { requestFit } from '../canvas/Canvas';
-import { detectKind } from '../core/diagram';
+import { requestFit } from '../lib/fit';
 import { emptyOverrides } from '../core/model';
-import { parseFlow } from '../flow/parser';
-import { serializeFlow } from '../flow/serializer';
-import { setConfigTheme } from '../core/ops';
-import { parse } from '../core/parser';
-import { serialize } from '../core/serializer';
-import { DEFAULT_THEME, THEMES } from '../core/themes';
 import { download, pdfBlob, pngBlob, projectBlob, svgString } from '../io/export';
 import { PROJECT_EXT, baseName, openFile } from '../io/project';
 import { current as S, type ProjectData } from '../state/store';
 import { getEditorView } from '../editor/CodeEditor';
 import { usePanel } from '../state/panel';
+import { diagramTheme, diagramThemeId } from '../state/appearance';
 import { toast } from '../state/toast';
 
-const project = (): ProjectData => ({ code: S().code, overrides: S().overrides, theme: S().theme });
-const theme = () => THEMES[S().theme] ?? THEMES.default;
+const project = (): ProjectData => ({ code: S().code, overrides: S().overrides, theme: diagramThemeId() });
+const theme = diagramTheme;
 
 // Save handle
 type SaveHandle = { createWritable(): Promise<{ write(b: Blob): Promise<void>; close(): Promise<void> }>; name: string };
@@ -24,7 +18,7 @@ const fsApi = window as unknown as {
   showSaveFilePicker?: (o: object) => Promise<SaveHandle>;
 };
 
-export function confirmDiscard(): boolean {
+function confirmDiscard(): boolean {
   return !S().dirty || window.confirm('You have unsaved changes. Discard them?');
 }
 
@@ -33,16 +27,7 @@ export function newDiagram(code: string, name = 'untitled', mode?: 'draw' | 'cod
   // Draw hides the code, Write shows it
   if (mode) usePanel.getState().setOpen(mode === 'code');
   saveHandle = null;
-  // Keep theme
-  const current = S().theme;
-  if (detectKind(code) === 'flowchart') {
-    const flow = parseFlow(code);
-    if (current !== DEFAULT_THEME && flow.config.theme === undefined) code = serializeFlow(setConfigTheme(flow, current));
-  } else {
-    const doc = parse(code);
-    if (current !== DEFAULT_THEME && doc.config.theme === undefined) code = serialize(setConfigTheme(doc, current));
-  }
-  S().load({ code, overrides: emptyOverrides(), theme: '' }, name);
+  S().load({ code, overrides: emptyOverrides() }, name);
   requestAnimationFrame(requestFit);
   if (mode === 'code') requestAnimationFrame(() => getEditorView()?.focus());
 }

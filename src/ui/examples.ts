@@ -23,13 +23,9 @@ export const EXAMPLES: { name: string; group: 'Sequence' | 'Flowchart'; code: st
     B-->>U: Show result`,
   },
   {
-    name: 'Prize redemption (redux-color)',
+    name: 'Prize redemption',
     group: 'Sequence',
-    code: `---
-config:
-  theme: redux-color
----
-sequenceDiagram
+    code: `sequenceDiagram
     actor Admin
     participant Portal
     participant App as Dealer App

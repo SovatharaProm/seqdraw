@@ -8,14 +8,14 @@ const DEBOUNCE_MS = 300;
 interface Draft {
   code: string;
   overrides: ReturnType<typeof emptyOverrides>;
-  theme: string;
+  theme?: string;
   fileName: string;
   dirty: boolean;
 }
 
 function write() {
-  const { code, pending, overrides, theme, fileName, dirty } = useStore.getState();
-  const draft: Draft = { code: pending ?? code, overrides, theme, fileName, dirty };
+  const { code, pending, overrides, fileName, dirty } = useStore.getState();
+  const draft: Draft = { code: pending ?? code, overrides, fileName, dirty };
   writeJson('draft', draft);
 }
 
@@ -28,7 +28,6 @@ export function restoreDraft() {
     {
       code: draft.code,
       overrides: { ...emptyOverrides(), ...(draft.overrides ?? {}) },
-      theme: draft.theme ?? '',
     },
     draft.fileName || 'untitled',
   );
@@ -39,7 +38,7 @@ export function restoreDraft() {
 export function startDraftAutosave() {
   let timer: ReturnType<typeof setTimeout> | undefined;
   useStore.subscribe((s, prev) => {
-    if (s.code === prev.code && s.pending === prev.pending && s.overrides === prev.overrides && s.theme === prev.theme && s.fileName === prev.fileName && s.dirty === prev.dirty) return;
+    if (s.code === prev.code && s.pending === prev.pending && s.overrides === prev.overrides && s.fileName === prev.fileName && s.dirty === prev.dirty) return;
     clearTimeout(timer);
     timer = setTimeout(write, DEBOUNCE_MS);
   });

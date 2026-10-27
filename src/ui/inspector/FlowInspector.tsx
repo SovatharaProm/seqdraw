@@ -8,7 +8,7 @@ import { useStore, type Selection } from '../../state/store';
 import { LinkButton } from '../components/Button';
 import { Field, FieldPair, SelectField, TextField, type Option } from '../components/Field';
 import { Icons } from '../icons';
-import { LINK_HEADS, LINK_LENGTHS, LINK_STROKES, LINK_WAYS, SIDES } from './options';
+import { LINE_SHAPES, LINK_HEADS, LINK_LENGTHS, LINK_STROKES, LINK_WAYS, SIDES } from './options';
 import { InspectorPanel } from './Panel';
 
 const SHAPES: Option<FlowShape>[] = FLOW_SHAPES.map((s) => ({ value: s.shape, label: s.name }));
@@ -59,12 +59,14 @@ function EdgePanel({ selection, e }: { selection: Selection; e: FlowEdge }) {
         <SelectField label="Ends" value={both ? 'both' : 'one'} options={LINK_WAYS} disabled={spec.end === 'none'} onChange={(w) => set({ start: w === 'both' ? spec.end : 'none' })} />
         <SelectField label="Length" value={spec.length} options={LINK_LENGTHS} onChange={(length) => set({ length })} />
       </FieldPair>
+      <SelectField label="Line style" value={routed?.shape ?? 'auto'} options={LINE_SHAPES} onChange={(v) => flowActions.setEdgeShape(e.index, v)} />
       <FieldPair>
         <SelectField label="Start side" value={side('from')} options={SIDES} onChange={(v) => setSide('from', v)} />
         <SelectField label="End side" value={side('to')} options={SIDES} onChange={(v) => setSide('to', v)} />
       </FieldPair>
       <LinkButton onClick={() => flowActions.reverseEdge(e.index)}><Icons.swap /> Reverse direction</LinkButton>
-      {(routed?.fromSide || routed?.toSide) && <LinkButton onClick={() => flowActions.setEdgeSides(e.index, { from: undefined, to: undefined })}>Unpin sides (auto route)</LinkButton>}
+      {!!(routed?.route?.length || routed?.bends?.length) && <LinkButton onClick={() => flowActions.resetEdgeRoute(e.index)}>Reset route</LinkButton>}
+      {(routed?.fromSide || routed?.toSide) && <LinkButton onClick={() => flowActions.setEdgeSides(e.index, { from: undefined, to: undefined })}>Unpin sides</LinkButton>}
     </InspectorPanel>
   );
 }

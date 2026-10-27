@@ -1,5 +1,5 @@
 // Sequence diagram canvas overlays
-import { dropLine, nearestParticipant, type Layout } from '../core/layout';
+import { clampParticipantX, dropLine, nearestParticipant, type Layout } from '../core/layout';
 import { FONT_FAMILY, FONT_SIZE } from '../core/measure';
 import type { Theme } from '../core/themes';
 import { selfPath, StatementShape } from '../render/DiagramSvg';
@@ -59,7 +59,7 @@ export function DragOverlay({ drag: d, layout, theme, k, end }: { drag: Drag; la
   const none = { pointerEvents: 'none' as const };
   if (d.type === 'participant' && d.moved) {
     const p = layout.participants.find((q) => q.id === d.id)!;
-    const x = d.origX + d.dx;
+    const x = clampParticipantX(layout, d.id, d.origX + d.dx);
     return (
       <g style={none} opacity={0.75}>
         <rect x={x - p.width / 2} y={p.top} width={p.width} height={p.height} rx={3} fill="var(--accent-soft)" stroke={accent} strokeWidth={sw} strokeDasharray={`${6 / k} ${4 / k}`} />

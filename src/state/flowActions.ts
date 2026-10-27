@@ -1,16 +1,21 @@
 // Flowchart canvas actions
 import { fromMermaidText } from '../core/measure';
+import { setConfigLayout } from '../core/ops';
+import { engineOf, type LayoutEngine } from '../flow/elk';
 import type { LayoutOverrides } from '../core/model';
-import { clusterAt, edgeKeys, nodeAt, type Pt } from '../flow/layout';
+import { clusterAt, edgeKeys, nodeAt, type EdgePort, type LineShape, type Pt } from '../flow/layout';
 import type { FlowDir, FlowDoc, FlowLine, FlowShape, Link, Side } from '../flow/model';
 import { addEdge, addNode, addSubgraph, deleteEdge, deleteNode, flowInsertLine, renameSubgraph, reverseEdge as reverseEdgeOp, setDirection, setEdge, setNodeLabel, setNodeShape, uniqueNodeId, unwrapSubgraph } from '../flow/ops';
 import { analyzeFlow } from '../flow/parser';
 import { isFreeEnd } from '../flow/shapes';
-import { current as S, type FlowSelection, type Selection } from './store';
+import { current as S, fitAfterLayout, type FlowSelection, type Selection } from './store';
 
 export type FlowPaletteItem = `flow:${FlowShape}` | 'subgraph';
 
 const F = (): FlowDoc => S().flow!;
+// Forget all node positions
+const clearPositions = (o: LayoutOverrides) => ({ ...o, nodes: {} });
+
 // Keep every node where it is now
 const freeze = (o: LayoutOverrides, keep?: Set<string>): LayoutOverrides => {
   const L = S().flowLayout;
@@ -32,7 +37,7 @@ function pruneFree(lines: FlowLine[]): FlowLine[] {
   }
 }
 
-// Canvas edits don't rearrange existing nodes
+// Commit, keeping nodes in place
 const commit = (raw: FlowLine[], opts: { select?: Selection | null; edit?: FlowSelection; overrides?: LayoutOverrides } = {}) => {
   const lines = pruneFree(raw);
   if (lines !== raw && opts.select?.kind === 'edge') {
@@ -41,9 +46,18 @@ const commit = (raw: FlowLine[], opts: { select?: Selection | null; edit?: FlowS
     const e = before && analyzeFlow(lines).edges.find((x) => x.from === before.from && x.to === before.to && Math.abs(x.line - before.line) <= 1);
     opts = { ...opts, select: e ? { kind: 'edge', index: e.index, line: e.line } : null };
   }
-  const keep = new Set(analyzeFlow(lines).nodes.map((n) => n.id));
-  S().commit(lines, { ...opts, overrides: freeze(opts.overrides ?? S().overrides, keep) });
+  const after = analyzeFlow(lines);
+  const keep = new Set(after.nodes.map((n) => n.id));
+  let overrides = opts.overrides ?? S().overrides;
+  if (engineOf(after) !== 'elk') overrides = freeze(overrides, keep);
+  // Adaptive: structure changes re-arrange
+  else if (structureOf(after) !== structureOf(F())) overrides = clearPositions(overrides);
+  else if (hasPositions(overrides)) overrides = freeze(overrides, keep);
+  S().commit(lines, { ...opts, overrides });
 };
+
+// Node and link ids
+const structureOf = (doc: FlowDoc) => JSON.stringify([doc.nodes.map((n) => n.id), doc.edges.map((e) => [e.from, e.to])]);
 
 type Ports = NonNullable<LayoutOverrides['ports']>;
 
@@ -54,11 +68,17 @@ const withPorts = (o: LayoutOverrides, fn: (ports: Ports) => void): LayoutOverri
 };
 
 // Set sides on an edge key (undefined clears)
-const pin = (ports: Ports, key: string | undefined, sides: { from?: Side; to?: Side }) => {
+const pin = (ports: Ports, key: string | undefined, patch: EdgePort) => {
   if (!key) return;
-  const next = { ...ports[key], ...sides };
-  (Object.keys(next) as ('from' | 'to')[]).forEach((k) => next[k] === undefined && delete next[k]);
-  if (next.from || next.to) ports[key] = next;
+  const prev = ports[key] ?? {};
+  const next: EdgePort = { ...prev, ...patch };
+  const moved = (end: 'from' | 'to') => end in patch && patch[end] !== prev[end];
+  // Moved end: drop its spot and the route
+  if (moved('from') && !('fromAt' in patch)) delete next.fromAt;
+  if (moved('to') && !('toAt' in patch)) delete next.toAt;
+  if ((moved('from') || moved('to') || 'fromAt' in patch || 'toAt' in patch) && !('route' in patch)) delete next.route;
+  (Object.keys(next) as (keyof EdgePort)[]).forEach((k) => next[k] === undefined && delete next[k]);
+  if (next.from || next.to || next.shape || next.points?.length) ports[key] = next;
   else delete ports[key];
 };
 
@@ -151,6 +171,24 @@ export function setShape(id: string, shape: FlowShape) {
   commit(setNodeShape(F(), id, shape), { select: { kind: 'node', id } });
 }
 
+// Paste a node copy
+export function pasteNode(shape: FlowShape, label: string, classes: string[], at: Pt, parent?: string) {
+  const f = F();
+  const { lines, id } = addNode(f, shape, label, { classes, subgraph: parent && f.subgraphs.some((s) => s.id === parent) ? parent : undefined });
+  const overrides = withNodes(S().overrides, (n) => (n[id] = { x: Math.round(at.x), y: Math.round(at.y) }));
+  commit(lines, { select: { kind: 'node', id }, overrides });
+  return id;
+}
+
+// Paste a link copy between the same nodes
+export function pasteEdge(from: string, to: string, link: Link) {
+  const f = F();
+  if (!f.nodes.some((n) => n.id === from) || !f.nodes.some((n) => n.id === to)) return;
+  const { lines, line } = addEdge(f, from, to, link);
+  const index = analyzeFlow(lines).edges.find((e) => e.line === line)?.index;
+  commit(lines, { select: index === undefined ? null : { kind: 'edge', index, line } });
+}
+
 // Move node by an offset
 export function moveNode(id: string, dx: number, dy: number) {
   S().setOverrides(
@@ -163,13 +201,13 @@ export function moveNode(id: string, dx: number, dy: number) {
 
 // Re-run Mermaid's layout
 export function autoLayout() {
-  S().setOverrides(withNodes(S().overrides, (n) => Object.keys(n).forEach((k) => delete n[k])));
+  S().setOverrides(clearPositions(S().overrides));
 }
 
 // Has hand-placed nodes
 export const hasPositions = (o: LayoutOverrides) => Object.keys(o.nodes ?? {}).length > 0;
 
-export function connectNodes(from: string, to: string, sides: { from?: Side; to?: Side } = {}) {
+export function connectNodes(from: string, to: string, sides: EdgePort = {}) {
   const { lines, line } = addEdge(F(), from, to);
   const select = edgeAt(lines, line);
   commit(lines, { select, overrides: withPorts(S().overrides, (p) => pin(p, keyOf(lines, select), sides)) });
@@ -184,19 +222,28 @@ export function connectToNew(from: string, at: Pt, side?: Side) {
   commit(lines, { select: { kind: 'node', id }, edit: { kind: 'node', id }, overrides });
 }
 
-export function updateEdge(index: number, patch: Partial<Link> & { from?: string; to?: string }, sides?: { from?: Side; to?: Side }, extra?: { lines?: (l: FlowLine[]) => FlowLine[]; place?: Record<string, Pt> }) {
+export function updateEdge(index: number, patch: Partial<Link> & { from?: string; to?: string }, sides?: EdgePort, extra?: { lines?: (l: FlowLine[]) => FlowLine[]; place?: Record<string, Pt> }) {
   const f = F();
   const e = f.edges[index];
   if (!e) return;
   let lines = setEdge(f, index, patch);
   if (extra?.lines) lines = extra.lines(lines);
   const select = findEdge(f, lines, e.line, patch.from ?? e.from, patch.to ?? e.to);
-  // Carry sides to the new key; a changed end loses its side
+  // Carry ports to the new key
   const oldKey = edgeKeys(f)[index];
   const old = S().overrides.ports?.[oldKey] ?? {};
   const ported = withPorts(S().overrides, (p) => {
     delete p[oldKey];
-    pin(p, keyOf(lines, select), { from: patch.from !== undefined && patch.from !== e.from ? undefined : old.from, to: patch.to !== undefined && patch.to !== e.to ? undefined : old.to, ...sides });
+    const keepFrom = patch.from === undefined || patch.from === e.from;
+    const keepTo = patch.to === undefined || patch.to === e.to;
+    pin(p, keyOf(lines, select), {
+      from: keepFrom ? old.from : undefined,
+      fromAt: keepFrom ? old.fromAt : undefined,
+      to: keepTo ? old.to : undefined,
+      toAt: keepTo ? old.toAt : undefined,
+      route: keepFrom && keepTo ? old.route : undefined,
+      ...sides,
+    });
   });
   const overrides = extra?.place ? withNodes(ported, (n) => Object.assign(n, extra.place)) : ported;
   commit(lines, { select, overrides });
@@ -221,19 +268,45 @@ export function detachEdge(index: number, end: 'from' | 'to', at: Pt) {
   updateEdge(index, { [end]: id }, undefined, { lines: declare, place: { [id]: pos } });
 }
 
-// Pin link ends to node sides
-export function setEdgeSides(index: number, sides: { from?: Side; to?: Side }) {
+// Edit one link's ports entry
+const editPort = (index: number, fn: (ports: Ports, key: string) => void) => {
   const key = edgeKeys(F())[index];
-  if (key) S().setOverrides(withPorts(S().overrides, (p) => pin(p, key, sides)));
-}
+  if (key) S().setOverrides(withPorts(S().overrides, (p) => fn(p, key)));
+};
+
+// Pin link ends to node sides
+export const setEdgeSides = (index: number, sides: EdgePort) => editPort(index, (p, key) => pin(p, key, sides));
 
 // Drop a link end on a node side
-export function reconnectEdge(index: number, end: 'from' | 'to', node: string, side: Side) {
+export function reconnectEdge(index: number, end: 'from' | 'to', node: string, side: Side, at?: number) {
   const e = F().edges[index];
   if (!e) return;
-  if (e[end] === node) return setEdgeSides(index, { [end]: side });
-  updateEdge(index, { [end]: node }, { [end]: side });
+  const port: EdgePort = end === 'from' ? { from: side, fromAt: at } : { to: side, toAt: at };
+  if (e[end] === node) return setEdgeSides(index, port);
+  updateEdge(index, { [end]: node }, port);
 }
+
+// Line style (Auto: back to Mermaid's curve)
+export function setEdgeShape(index: number, shape: LineShape) {
+  editPort(index, (p, key) => {
+    if (shape === 'auto') return void delete p[key];
+    const cur = p[key] ?? {};
+    p[key] = shape === 'ortho' ? { ...cur, shape, points: undefined } : { ...cur, shape, route: undefined };
+    pin(p, key, {});
+  });
+}
+
+// Straight / curved bend points
+export function setEdgeBends(index: number, points: Pt[]) {
+  const rounded = points.map((q) => ({ x: Math.round(q.x), y: Math.round(q.y) }));
+  editPort(index, (p, key) => pin(p, key, { points: rounded.length ? rounded : undefined }));
+}
+
+// Drop hand-made bends
+export const resetEdgeRoute = (index: number) => editPort(index, (p, key) => pin(p, key, { route: undefined, points: undefined }));
+
+// Hand-made orthogonal route
+export const setEdgeRoute = (index: number, port: EdgePort) => editPort(index, (p, key) => pin(p, key, port));
 
 export function reverseEdge(index: number) {
   const f = F();
@@ -246,13 +319,20 @@ export function reverseEdge(index: number) {
   const old = S().overrides.ports?.[oldKey] ?? {};
   const overrides = withPorts(S().overrides, (p) => {
     delete p[oldKey];
-    pin(p, keyOf(lines, select), { from: old.to, to: old.from });
+    pin(p, keyOf(lines, select), { from: old.to, to: old.from, fromAt: old.toAt, toAt: old.fromAt, route: old.route?.slice().reverse() });
   });
   commit(lines, { select, overrides });
+}
+
+// Hierarchical (dagre) or Adaptive (ELK)
+export function setLayoutEngine(engine: LayoutEngine) {
+  if (engineOf(F()) === engine) return;
+  fitAfterLayout();
+  S().commit(setConfigLayout(F(), engine === 'elk' ? 'elk' : null), { overrides: clearPositions(S().overrides) });
 }
 
 export function setFlowDirection(dir: FlowDir) {
   if (F().dir === dir) return;
   // Positions don't survive a turn
-  S().commit(setDirection(F(), dir), { overrides: withNodes(S().overrides, (n) => Object.keys(n).forEach((k) => delete n[k])) });
+  S().commit(setDirection(F(), dir), { overrides: clearPositions(S().overrides) });
 }

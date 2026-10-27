@@ -3,16 +3,16 @@ import { readBool, writeBool } from '../lib/storage';
 import { detectKind, type DiagramKind } from '../core/diagram';
 import { layoutDiagram, type Layout } from '../core/layout';
 import { emptyOverrides, type Doc, type LayoutOverrides, type Line } from '../core/model';
-import { measureFor } from '../core/measure';
-import { setConfigTheme } from '../core/ops';
+import { measureFor, type Measure } from '../core/measure';
 import { parse } from '../core/parser';
 import { serialize } from '../core/serializer';
-import { LEGACY_THEMES, THEMES, resolveTheme } from '../core/themes';
+import { THEMES } from '../core/themes';
+import { elkLayout, engineOf, layoutSignature, type AutoLayout } from '../flow/elk';
+import { requestFit } from '../lib/fit';
 import { layoutFlow, type FlowLayout } from '../flow/layout';
 import type { FlowDoc, FlowLine } from '../flow/model';
 import { parseFlow } from '../flow/parser';
 import { serializeFlow } from '../flow/serializer';
-import { EXAMPLES } from '../ui/examples';
 
 // Flowchart selection
 export type FlowSelection = { kind: 'node'; id: string } | { kind: 'subgraph'; id: string } | { kind: 'edge'; index: number; line: number };
@@ -25,8 +25,6 @@ export type Selection =
 // Edit target
 export type EditTarget = { kind: 'participant'; id: string } | { kind: 'message' | 'note' | 'frame' | 'branch'; line: number } | FlowSelection;
 
-// Selection -> edit target
-export const editTargetOf = (sel: Selection): EditTarget => sel;
 
 interface Snapshot {
   code: string;
@@ -36,13 +34,13 @@ interface Snapshot {
 export interface ProjectData {
   code: string;
   overrides: LayoutOverrides;
-  theme: string;
+  // Theme at save time
+  theme?: string;
 }
 
 interface State {
   code: string;
   overrides: LayoutOverrides;
-  theme: string;
   kind: DiagramKind;
   doc: Doc;
   layout: Layout;
@@ -67,7 +65,6 @@ interface State {
   setAutoUpdate(on: boolean): void;
   commit(lines: Line[] | FlowLine[], opts?: { select?: Selection | null; overrides?: LayoutOverrides; edit?: EditTarget }): void;
   setOverrides(overrides: LayoutOverrides): void;
-  setTheme(theme: string): void;
   select(sel: Selection | null, source?: 'canvas' | 'editor'): void;
   setEditing(target: EditTarget | null): void;
   undo(): void;
@@ -78,7 +75,7 @@ interface State {
 }
 
 // Flowchart line -> selection
-export function flowSelectionForLine(flow: FlowDoc, line: number): Selection | null {
+function flowSelectionForLine(flow: FlowDoc, line: number): Selection | null {
   const edge = flow.edges.find((e) => e.line === line);
   if (edge) return { kind: 'edge', index: edge.index, line };
   const node = flow.nodes.find((n) => n.declLine === line) ?? flow.nodes.find((n) => n.firstLine === line);
@@ -122,7 +119,7 @@ export function lineSelection(s: { doc: Doc; flow: FlowDoc | null }, line: numbe
 }
 
 // Line -> selection
-export function selectionForLine(doc: Doc, line: number): Selection | null {
+function selectionForLine(doc: Doc, line: number): Selection | null {
   const s = doc.lines[line]?.stmt;
   if (!s) return null;
   if (s.type === 'message' || s.type === 'note') return { kind: s.type, line };
@@ -141,7 +138,7 @@ export function selectionForLine(doc: Doc, line: number): Selection | null {
 }
 
 // Selection -> line
-export function selectionLine(doc: Doc, sel: Selection): number {
+function selectionLine(doc: Doc, sel: Selection): number {
   if (sel.kind === 'node' || sel.kind === 'subgraph') return -1;
   if (sel.kind !== 'participant') return sel.line;
   const p = doc.participants.find((x) => x.id === sel.id);
@@ -154,33 +151,50 @@ const HISTORY_LIMIT = 200;
 const COALESCE_MS = 800;
 let lastTyping = 0;
 
-// Derive doc, theme, layout
+// Text metrics (both themes share the font)
+const measureText = () => measureFor(THEMES['redux-color'].fontFamily, THEMES['redux-color'].labelWeight);
+
+// Adaptive (ELK) results by layout signature
+const elkCache = new Map<string, AutoLayout>();
+const ELK_CACHE_MAX = 8;
+// Fit once the next ELK result lands (new diagram, engine switch)
+let fitOnElk = false;
+export const fitAfterLayout = () => (fitOnElk = true);
+
+function flowLayoutOf(flow: FlowDoc, overrides: LayoutOverrides, measure: Measure) {
+  const base = layoutFlow(flow, overrides.nodes ?? {}, measure, overrides.ports ?? {});
+  if (engineOf(flow) !== 'elk') return base;
+  const sig = layoutSignature(flow, base);
+  const auto = elkCache.get(sig);
+  if (auto) return layoutFlow(flow, overrides.nodes ?? {}, measure, overrides.ports ?? {}, auto);
+  // Dagre now, ELK when ready
+  elkLayout(flow, base).then((result) => {
+    elkCache.set(sig, result);
+    if (elkCache.size > ELK_CACHE_MAX) elkCache.delete(elkCache.keys().next().value!);
+    const s = useStore.getState();
+    if (!s.flow || s.flowLayout !== base) return;
+    useStore.setState({ flowLayout: layoutFlow(s.flow, s.overrides.nodes ?? {}, measure, s.overrides.ports ?? {}, result) });
+    if (fitOnElk) (fitOnElk = false), requestAnimationFrame(requestFit);
+  });
+  return base;
+}
+
+// Derive doc, layout
 function derive(code: string, overrides: LayoutOverrides) {
   const kind = detectKind(code);
+  const measure = measureText();
   if (kind === 'flowchart') {
     const flow = parseFlow(code);
-    const theme = resolveTheme(flow.config.theme);
-    const t = THEMES[theme];
     // Empty sequence doc
     const doc: Doc = { lines: [], participants: [], config: flow.config, errors: flow.errors, title: flow.title };
-    const measure = measureFor(t.fontFamily, t.labelWeight, t.upperLabels);
-    return { kind, doc, theme, flow, layout: layoutDiagram(doc, overrides, measure), flowLayout: layoutFlow(flow, overrides.nodes ?? {}, measure, overrides.ports ?? {}) };
+    return { kind, doc, flow, layout: layoutDiagram(doc, overrides, measure), flowLayout: flowLayoutOf(flow, overrides, measure) };
   }
   const doc = parse(code);
-  const theme = resolveTheme(doc.config.theme);
-  const t = THEMES[theme];
-  return { kind, doc, theme, flow: null, flowLayout: null, layout: layoutDiagram(doc, overrides, measureFor(t.fontFamily, t.labelWeight, t.upperLabels)) };
+  return { kind, doc, flow: null, flowLayout: null, layout: layoutDiagram(doc, overrides, measure) };
 }
 
-// Legacy theme
-function withLegacyTheme(code: string, theme: string | undefined): string {
-  if (detectKind(code) === 'flowchart') return code;
-  const legacy = theme ? LEGACY_THEMES[theme] : undefined;
-  const doc = parse(code);
-  return legacy && doc.config.theme === undefined ? serialize(setConfigTheme(doc, legacy)) : code;
-}
-
-const initial = EXAMPLES[0].code;
+// First visit: blank canvas
+const initial = '';
 
 export const useStore = create<State>((set, get) => {
   // Push history
@@ -253,13 +267,6 @@ export const useStore = create<State>((set, get) => {
       apply(get().code, overrides);
     },
 
-    // Set theme
-    setTheme(theme) {
-      if (theme === get().theme) return;
-      const { flow, doc } = get();
-      get().commit(flow ? setConfigTheme(flow, theme) : setConfigTheme(doc, theme));
-    },
-
     select(selection, source = 'canvas') {
       set({ selection, selectionSource: source });
     },
@@ -289,8 +296,9 @@ export const useStore = create<State>((set, get) => {
     },
 
     load(data, fileName) {
+      fitOnElk = true;
       lastTyping = 0;
-      const code = withLegacyTheme(data.code, data.theme);
+      const { code } = data;
       set({
         code,
         overrides: data.overrides,

@@ -24,7 +24,7 @@ export const splitLines = (text: string) => decodeEntities(text).split(/<br\s*\/
 
 const NAMED: Record<string, string> = { quot: '"', amp: '&', lt: '<', gt: '>', nbsp: '\u00a0' };
 
-export const decodeEntities = (text: string) => text.replace(/#(\d+|quot|amp|lt|gt|nbsp);/g, (m, n) => (/^\d/.test(n) ? String.fromCharCode(+n) : (NAMED[n] ?? m)));
+const decodeEntities = (text: string) => text.replace(/#(\d+|quot|amp|lt|gt|nbsp);/g, (m, n) => (/^\d/.test(n) ? String.fromCharCode(+n) : (NAMED[n] ?? m)));
 
 // Textbox text -> Mermaid text
 export const toMermaidText = (text: string) => text.trim().replace(/;/g, '#59;').replace(/\r?\n/g, '<br/>');

@@ -2,9 +2,9 @@ import { LINE_HEIGHT, measureText, splitLines, type Measure } from './measure';
 import { ARROW_SPECS, type ArrowSpec, type BlockKind, type Doc, type LayoutOverrides, type ParticipantKind } from './model';
 import { shapeOf } from './participants';
 
-export const MIN_BOX_WIDTH = 110;
-export const BOX_PAD = 16;
-export const MIN_GAP = 40; // min gap between boxes
+const MIN_BOX_WIDTH = 110;
+const BOX_PAD = 16;
+const MIN_GAP = 40; // min gap between boxes
 const SELF_W = 40;
 const ACT_W = 10;
 const MARGIN = 24;
@@ -299,4 +299,17 @@ export function nearestParticipant(layout: Layout, x: number): LParticipant | un
   let best: LParticipant | undefined;
   for (const p of layout.participants) if (!best || Math.abs(p.x - x) < Math.abs(best.x - x)) best = p;
   return best;
+}
+
+// Dragged participant x, kept clear of its neighbours (unless it passes one: reorder)
+export function clampParticipantX(layout: Layout, id: string, x: number): number {
+  const ps = layout.participants;
+  const i = ps.findIndex((p) => p.id === id);
+  if (i < 0) return x;
+  const cur = ps[i];
+  const prev = ps[i - 1];
+  const next = ps[i + 1];
+  if (prev && x > prev.x) x = Math.max(x, prev.x + prev.width / 2 + cur.width / 2 + MIN_GAP);
+  if (next && x < next.x) x = Math.min(x, next.x - next.width / 2 - cur.width / 2 - MIN_GAP);
+  return x;
 }

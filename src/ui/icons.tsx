@@ -46,7 +46,6 @@ export const Icons = {
   book: () => <Icon><path d="M2.5 3h4A1.5 1.5 0 0 1 8 4.5V14a1.5 1.5 0 0 0-1.5-1.5h-4zM13.5 3h-4A1.5 1.5 0 0 0 8 4.5V14a1.5 1.5 0 0 1 1.5-1.5h4z" /></Icon>,
   close: () => <Icon><path d="M4 4l8 8M12 4l-8 8" /></Icon>,
   play: () => <Icon><path d="M5 3.5v9l7-4.5z" /></Icon>,
-  theme: () => <Icon><circle cx="8" cy="8" r="5.5" /><path d="M8 2.5a5.5 5.5 0 0 1 0 11z" fill="currentColor" /></Icon>,
   chevronLeft: () => <Icon><path d="M10 3.5 5.5 8l4.5 4.5" /></Icon>,
   shapes: () => <Icon><rect x="2" y="2" width="5" height="5" rx="1" /><circle cx="11.5" cy="4.5" r="2.5" /><path d="M4.5 9.5 7 14H2zM9 9h5v5H9z" /></Icon>,
   trash: () => <Icon><path d="M2.5 4h11M6 4V2.5h4V4M4 4l.7 9.5h6.6L12 4M6.8 6.5v4.5M9.2 6.5v4.5" /></Icon>,
@@ -56,7 +55,6 @@ export const Icons = {
   error: () => <Icon><circle cx="8" cy="8" r="6.2" /><path d="M8 4.8v3.8M8 11v.1" /></Icon>,
   sun: () => <Icon><circle cx="8" cy="8" r="2.8" /><path d="M8 1.5v1.6M8 12.9v1.6M1.5 8h1.6M12.9 8h1.6M3.4 3.4l1.1 1.1M11.5 11.5l1.1 1.1M3.4 12.6l1.1-1.1M11.5 4.5l1.1-1.1" /></Icon>,
   moon: () => <Icon><path d="M13.5 9.8A5.8 5.8 0 0 1 6.2 2.5a5.8 5.8 0 1 0 7.3 7.3z" /></Icon>,
-  monitor: () => <Icon><rect x="1.8" y="2.5" width="12.4" height="8.5" rx="1.2" /><path d="M5.5 14h5M8 11v3" /></Icon>,
   lineSolid: () => <Icon><path d="M2 8h12" /></Icon>,
   lineDotted: () => <Icon><path d="M2 8h12" strokeDasharray="2 2" /></Icon>,
   arrowDotted: () => <Icon><path d="M2 8h10" strokeDasharray="2 2" /><path d="M10 5l3 3-3 3" /></Icon>,
@@ -84,7 +82,12 @@ export const Icons = {
   folder: () => <Icon><path d="M1.5 4.5A1.5 1.5 0 0 1 3 3h3l1.5 1.5H13A1.5 1.5 0 0 1 14.5 6v6A1.5 1.5 0 0 1 13 13.5H3A1.5 1.5 0 0 1 1.5 12z" /></Icon>,
   save: () => <Icon><path d="M3 1.5h8l3.5 3.5v8a1.5 1.5 0 0 1-1.5 1.5H3A1.5 1.5 0 0 1 1.5 13V3A1.5 1.5 0 0 1 3 1.5z" /><path d="M4.5 1.5v3.5h6v-3.5M4.5 14.5v-5h7v5" /></Icon>,
   export: () => <Icon><path d="M8 10V1.5M5 4.5l3-3 3 3" /><path d="M2.5 9v3.5A1.5 1.5 0 0 0 4 14h8a1.5 1.5 0 0 0 1.5-1.5V9" /></Icon>,
+  barUp: () => <Icon><path d="M2.5 2.5h11M8 13.5V6M5 9l3-3 3 3" /></Icon>,
+  barDown: () => <Icon><path d="M2.5 13.5h11M8 2.5V10M5 7l3 3 3-3" /></Icon>,
   chevronDown: () => <Icon width={10} height={10} strokeWidth={1.8}><path d="M4 6l4 4 4-4" /></Icon>,
+  // Layout engines
+  hierarchical: () => <Icon><circle cx="8" cy="3" r="1.6" /><circle cx="3.5" cy="13" r="1.6" /><circle cx="8" cy="13" r="1.6" /><circle cx="12.5" cy="13" r="1.6" /><path d="M8 4.6v6.8M8 8H3.5v3.4M8 8h4.5v3.4" /></Icon>,
+  adaptive: () => <Icon><circle cx="4" cy="3" r="1.6" /><circle cx="4" cy="13" r="1.6" /><circle cx="12" cy="13" r="1.6" /><path d="M4 4.6v6.8M4 7.5c0 2.5 2 3 4 3s4 .3 4 .9" /></Icon>,
   flowchart: () => <Icon><rect x="5" y="1.5" width="6" height="3.5" rx="0.8" /><path d="M8 5v2.5M8 7.5 11 10 8 12.5 5 10z" /><path d="M8 12.5v2" /></Icon>,
 };
 

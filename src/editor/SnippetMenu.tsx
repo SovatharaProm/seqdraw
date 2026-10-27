@@ -4,6 +4,7 @@ import { DIAGRAM_KINDS } from '../core/diagram';
 import { Icons, ShapeIcon } from '../ui/icons';
 import { getEditorView } from './CodeEditor';
 import { currentSnippets, insertSnippet, type Snippet } from './snippets';
+import { keys } from '../lib/platform';
 
 
 export type EditorTab = 'code' | 'snippets';
@@ -26,7 +27,7 @@ export function EditorHeader({ tab, onTab, onClose }: { tab: EditorTab; onTab: (
       </div>
       <span className="spacer" />
       {!autoUpdate && (
-        <button className="header-btn run" onClick={flush} disabled={!pending} title="Update the diagram (⌘↵)">
+        <button className="header-btn run" onClick={flush} disabled={!pending} title={keys('Update the diagram (⌘↵)')}>
           <Icons.play /> Run
         </button>
       )}

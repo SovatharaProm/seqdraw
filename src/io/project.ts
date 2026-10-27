@@ -3,7 +3,7 @@ import { emptyOverrides, type LayoutOverrides } from '../core/model';
 import type { ProjectData } from '../state/store';
 
 export const PROJECT_EXT = '.seqd';
-export const APP_ID = 'seqdraw';
+const APP_ID = 'seqdraw';
 const VERSION = 1;
 
 interface ProjectFile {
@@ -20,14 +20,14 @@ export function toProjectJson(data: ProjectData): string {
     app: APP_ID,
     version: VERSION,
     savedAt: new Date().toISOString(),
-    theme: data.theme,
+    theme: data.theme ?? '',
     code: data.code,
     layout: data.overrides,
   };
   return JSON.stringify(file, null, 2);
 }
 
-export function fromProjectJson(text: string): ProjectData | null {
+function fromProjectJson(text: string): ProjectData | null {
   let obj: unknown;
   try {
     obj = JSON.parse(text);
@@ -139,7 +139,7 @@ export async function openFile(file: File): Promise<ProjectData> {
   const project = fromProjectJson(text);
   if (project) return project;
   if (text.trimStart().startsWith('{')) throw new Error('This JSON file is not a SeqDraw project.');
-  return { code: codeFromText(text), overrides: emptyOverrides(), theme: 'default' };
+  return { code: codeFromText(text), overrides: emptyOverrides(), theme: '' };
 }
 
 export function baseName(fileName: string): string {

@@ -1,32 +1,20 @@
-import { useState, type ReactNode } from 'react';
+import { useState } from 'react';
 import { useStore } from '../state/store';
 import { EXAMPLES } from './examples';
-import { useAppearance, type Appearance } from '../state/appearance';
+import { useAppearance } from '../state/appearance';
 import { Icons, Logo } from './icons';
 import { IconButton } from './components/Button';
 import { Menu } from './components/Menu';
 import { exportAs, newDiagram, openDialog, save, type ExportFormat } from './fileActions';
+import { keys } from '../lib/platform';
 
-const APPEARANCES: { value: Appearance; label: string; Icon: () => ReactNode }[] = [
-  { value: 'system', label: 'System', Icon: Icons.monitor },
-  { value: 'light', label: 'Light', Icon: Icons.sun },
-  { value: 'dark', label: 'Dark', Icon: Icons.moon },
-];
-
-function AppearanceMenu() {
-  const appearance = useAppearance((s) => s.appearance);
-  const setAppearance = useAppearance((s) => s.setAppearance);
-  const Current = APPEARANCES.find((a) => a.value === appearance)!.Icon;
+// Light / dark switch (the diagram theme follows)
+function AppearanceToggle() {
+  const dark = useAppearance((s) => s.appearance === 'dark');
   return (
-    <Menu label={<Current />} title="Appearance" align="right" caret={false}>
-      {(close) =>
-        APPEARANCES.map(({ value, label, Icon }) => (
-          <button key={value} className={`menu-item ${value === appearance ? 'checked' : ''}`} aria-pressed={value === appearance} onClick={() => (close(), setAppearance(value))}>
-            <span className="menu-icon"><Icon /> {label}</span>
-          </button>
-        ))
-      }
-    </Menu>
+    <IconButton label={dark ? 'Switch to light mode' : 'Switch to dark mode'} onClick={() => useAppearance.getState().toggle()}>
+      {dark ? <Icons.sun /> : <Icons.moon />}
+    </IconButton>
   );
 }
 
@@ -136,8 +124,8 @@ export function Toolbar({ onHelp }: { onHelp: () => void }) {
             </>
           )}
         </Menu>
-        <button onClick={openDialog} title="Open a .seqd, .mmd, or editable PNG/SVG file (⌘O)"><Icons.folder /> Open</button>
-        <button className="primary" onClick={() => save()} title="Save a .seqd file you can reopen later (⌘S)"><Icons.save /> Save</button>
+        <button onClick={openDialog} title={keys('Open a .seqd, .mmd, or editable PNG/SVG file (⌘O)')}><Icons.folder /> Open</button>
+        <button className="primary" onClick={() => save()} title={keys('Save a .seqd file you can reopen later (⌘S)')}><Icons.save /> Save</button>
         <ExportMenu />
       </div>
 
@@ -147,7 +135,7 @@ export function Toolbar({ onHelp }: { onHelp: () => void }) {
       </div>
 
       <div className="spacer" />
-      <AppearanceMenu />
+      <AppearanceToggle />
       <IconButton label="Help & shortcuts" onClick={onHelp}><Icons.help /></IconButton>
     </header>
   );
