@@ -96,6 +96,10 @@ export interface Doc {
 // Layout overrides (saved in .seqd, not in code)
 export interface LayoutOverrides {
   participants: Record<string, { width?: number; height?: number; gap?: number }>;
+  // Flowchart node positions (centers)
+  nodes?: Record<string, { x: number; y: number }>;
+  // Flowchart link sides, by edge key
+  ports?: Record<string, { from?: 'top' | 'right' | 'bottom' | 'left'; to?: 'top' | 'right' | 'bottom' | 'left' }>;
 }
 
-export const emptyOverrides = (): LayoutOverrides => ({ participants: {} });
+export const emptyOverrides = (): LayoutOverrides => ({ participants: {}, nodes: {}, ports: {} });

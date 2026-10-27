@@ -2,11 +2,13 @@
 import { snippet, type Completion, type CompletionContext, type CompletionResult } from '@codemirror/autocomplete';
 import type { EditorView } from '@codemirror/view';
 import { declarationOf, PARTICIPANT_SHAPES } from '../core/participants';
+import type { FlowShape } from '../flow/model';
+import { FLOW_SHAPES } from '../flow/shapes';
 import { THEMES } from '../core/themes';
 import { useStore } from '../state/store';
 import type { Icons } from '../ui/icons';
 
-export type SnippetGroup = 'Participants' | 'Messages' | 'Notes' | 'Fragments' | 'Other';
+export type SnippetGroup = 'Participants' | 'Messages' | 'Notes' | 'Fragments' | 'Nodes' | 'Links' | 'Structure' | 'Styling' | 'Other';
 
 export interface Snippet {
   id: string;
@@ -17,6 +19,8 @@ export interface Snippet {
   detail: string;
   group: SnippetGroup;
   icon: keyof typeof Icons;
+  // Flowchart shape icon
+  shape?: FlowShape;
   // Template
   template: (a: string, b: string) => string;
 }
@@ -59,10 +63,53 @@ export const SNIPPETS: Snippet[] = [
 
 export const SNIPPET_GROUPS: SnippetGroup[] = ['Participants', 'Messages', 'Notes', 'Fragments', 'Other'];
 
+const link = (arrow: string) => (a: string, b: string) => `\${1:${a}} ${arrow} \${2:${b}}`;
+
+export const FLOW_SNIPPETS: Snippet[] = [
+  ...FLOW_SHAPES.map((d): Snippet => ({
+    id: `node-${d.shape}`, group: 'Nodes', label: d.name, keyword: d.name.toLowerCase(), icon: 'participant', shape: d.shape, detail: d.hint,
+    template: () => `\${1:id}${d.open}\${2:${d.defaultLabel}}${d.close}`,
+  })),
+
+  { id: 'link-arrow', group: 'Links', label: 'Arrow', keyword: 'arrow', icon: 'message', detail: 'A --> B', template: link('-->') },
+  { id: 'link-label', group: 'Links', label: 'Labelled arrow', keyword: 'label', icon: 'message', detail: 'A -->|text| B', template: (a, b) => `\${1:${a}} -->|\${3:yes}| \${2:${b}}` },
+  { id: 'link-open', group: 'Links', label: 'Line', keyword: 'line', icon: 'lineSolid', detail: 'No arrowhead  A --- B', template: link('---') },
+  { id: 'link-dotted', group: 'Links', label: 'Dotted arrow', keyword: 'dotted', icon: 'arrowDotted', detail: 'A -.-> B', template: link('-.->') },
+  { id: 'link-thick', group: 'Links', label: 'Thick arrow', keyword: 'thick', icon: 'message', detail: 'A ==> B', template: link('==>') },
+  { id: 'link-both', group: 'Links', label: 'Both ways', keyword: 'both', icon: 'swap', detail: 'A <--> B', template: link('<-->') },
+  { id: 'link-circle', group: 'Links', label: 'Circle end', keyword: 'circle end', icon: 'async', detail: 'A --o B', template: link('--o') },
+  { id: 'link-cross', group: 'Links', label: 'Cross end', keyword: 'cross', icon: 'cross', detail: 'A --x B', template: link('--x') },
+  { id: 'link-hidden', group: 'Links', label: 'Invisible', keyword: 'invisible', icon: 'lineDotted', detail: 'Layout only  A ~~~ B', template: link('~~~') },
+  { id: 'link-chain', group: 'Links', label: 'Chain', keyword: 'chain', icon: 'message', detail: 'A --> B --> C', template: (a, b) => `\${1:${a}} --> \${2:${b}} --> \${3:C}` },
+
+  { id: 'subgraph', group: 'Structure', label: 'Subgraph', keyword: 'subgraph', icon: 'subgraph', detail: 'Titled group', template: () => 'subgraph ${1:id} [${2:Title}]\n\t${}\nend' },
+  { id: 'direction', group: 'Structure', label: 'Direction', keyword: 'direction', icon: 'swap', detail: 'TB, BT, LR or RL (inside a subgraph)', template: () => 'direction ${1:LR}' },
+
+  { id: 'classDef', group: 'Styling', label: 'Class', keyword: 'classDef', icon: 'highlight', detail: 'Define a style class', template: () => 'classDef ${1:accent} fill:${2:#eef2ff},stroke:${3:#4f46e5}' },
+  { id: 'class', group: 'Styling', label: 'Apply class', keyword: 'class', icon: 'highlight', detail: 'class A,B name', template: (a) => `class \${1:${a}} \${2:accent}` },
+  { id: 'style', group: 'Styling', label: 'Style node', keyword: 'style', icon: 'highlight', detail: 'One node only', template: (a) => `style \${1:${a}} fill:\${2:#eef2ff},stroke:\${3:#4f46e5}` },
+  { id: 'linkStyle', group: 'Styling', label: 'Style link', keyword: 'linkStyle', icon: 'lineSolid', detail: 'By link number, from 0', template: () => 'linkStyle ${1:0} stroke:${2:#4f46e5},stroke-width:2px' },
+  { id: 'click', group: 'Other', label: 'Link to URL', keyword: 'click', icon: 'book', detail: 'Clickable node (in Mermaid)', template: (a) => `click \${1:${a}} "\${2:https://example.com}"` },
+  { id: 'flow-comment', group: 'Other', label: 'Comment', keyword: 'comment', icon: 'comment', detail: 'Not drawn  %%', template: () => '%% ${1:comment}' },
+];
+
+export const FLOW_SNIPPET_GROUPS: SnippetGroup[] = ['Nodes', 'Links', 'Structure', 'Styling', 'Other'];
+
+const isFlow = () => useStore.getState().kind === 'flowchart';
+
+// Snippets for the current diagram
+export const currentSnippets = () => (isFlow() ? { snippets: FLOW_SNIPPETS, groups: FLOW_SNIPPET_GROUPS } : { snippets: SNIPPETS, groups: SNIPPET_GROUPS });
+
+// Ids in this diagram
+function diagramIds(): { id: string; label: string }[] {
+  const s = useStore.getState();
+  return s.flow ? s.flow.nodes.map((n) => ({ id: n.id, label: n.label })) : s.doc.participants.map((p) => ({ id: p.id, label: p.label }));
+}
+
 // Default names
 function names(): [string, string] {
-  const ids = useStore.getState().doc.participants.map((p) => p.id);
-  return [ids[0] ?? 'Alice', ids[1] ?? ids[0] ?? 'Bob'];
+  const ids = diagramIds().map((p) => p.id);
+  return isFlow() ? [ids[0] ?? 'A', ids[1] ?? 'B'] : [ids[0] ?? 'Alice', ids[1] ?? ids[0] ?? 'Bob'];
 }
 
 const apply = (s: Snippet) => snippet(s.template(...names()));
@@ -82,16 +129,16 @@ export function completeMermaid(ctx: CompletionContext): CompletionResult | null
   }
   if (word.from === word.to && !ctx.explicit) return null;
   const atLineStart = /^\s*$/.test(line.text.slice(0, word.from - line.from));
-  const participants: Completion[] = useStore
-    .getState()
-    .doc.participants // skip half-typed word
+  const kindName = isFlow() ? 'node' : 'participant';
+  // Skip half-typed word
+  const participants: Completion[] = diagramIds()
     .filter((p) => p.id !== word.text)
-    .map((p) => ({ label: p.id, type: 'variable', detail: p.label !== p.id ? p.label : 'participant', boost: 1 }));
+    .map((p) => ({ label: p.id, type: 'variable', detail: p.label !== p.id ? p.label : kindName, boost: 1 }));
   if (!atLineStart) return { from: word.from, options: participants, validFor: /^[\w-]*$/ };
-  const snippets: Completion[] = SNIPPETS.map((s) => ({
+  const snippets: Completion[] = currentSnippets().snippets.map((s) => ({
     label: s.keyword,
     detail: s.detail,
-    type: s.group === 'Fragments' || s.group === 'Other' ? 'keyword' : 'function',
+    type: s.group === 'Fragments' || s.group === 'Other' || s.group === 'Structure' ? 'keyword' : 'function',
     section: s.group,
     apply: (view, completion, from, to) => apply(s)(view, completion, from, to),
   }));
@@ -105,7 +152,7 @@ export function insertSnippet(view: EditorView, s: Snippet) {
   view.focus();
   if (line.text.trim()) {
     const indent = line.text.match(/^\s*/)![0];
-    const extra = /^\s*(loop|alt|opt|par|critical|break|rect|else|and|option)\b/.test(line.text) ? '    ' : '';
+    const extra = /^\s*(loop|alt|opt|par|critical|break|rect|else|and|option|subgraph)\b/.test(line.text) ? '    ' : '';
     view.dispatch({ changes: { from: line.to, insert: `\n${indent}${extra}` }, selection: { anchor: line.to + 1 + indent.length + extra.length } });
   } else if (!line.text.length && line.number > 1) {
     // Match indent

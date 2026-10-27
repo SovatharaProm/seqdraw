@@ -1,5 +1,7 @@
 // Icons
 import type { ReactNode, SVGProps } from 'react';
+import type { FlowShape } from '../flow/model';
+import { flowShapeOf } from '../flow/shapes';
 
 const Icon = ({ children, ...props }: SVGProps<SVGSVGElement> & { children: ReactNode }) => (
   <svg width={16} height={16} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.4} strokeLinecap="round" strokeLinejoin="round" aria-hidden {...props}>
@@ -76,4 +78,30 @@ export const Icons = {
   panelClosed: () => <Icon><rect x="2" y="2.5" width="12" height="11" rx="1.5" /><path d="M2 9h12" /></Icon>,
   code: () => <Icon><path d="M5 4.5 1.5 8 5 11.5M11 4.5 14.5 8 11 11.5M9.2 2.5 6.8 13.5" /></Icon>,
   swap: () => <Icon><path d="M2.5 5.5h11M11 3l2.5 2.5L11 8M13.5 10.5h-11M5 8l-2.5 2.5L5 13" /></Icon>,
+  subgraph: () => <Icon><rect x="1.5" y="2" width="13" height="12" rx="1.5" /><path d="M1.5 5h13" /><rect x="4.5" y="7.5" width="7" height="4" rx="0.8" /></Icon>,
+  // Toolbar
+  newFile: () => <Icon><path d="M9.5 1.5H4A1.5 1.5 0 0 0 2.5 3v10A1.5 1.5 0 0 0 4 14.5h8a1.5 1.5 0 0 0 1.5-1.5V5.5z" /><path d="M9.5 1.5v4h4M8 7.5v4M6 9.5h4" /></Icon>,
+  folder: () => <Icon><path d="M1.5 4.5A1.5 1.5 0 0 1 3 3h3l1.5 1.5H13A1.5 1.5 0 0 1 14.5 6v6A1.5 1.5 0 0 1 13 13.5H3A1.5 1.5 0 0 1 1.5 12z" /></Icon>,
+  save: () => <Icon><path d="M3 1.5h8l3.5 3.5v8a1.5 1.5 0 0 1-1.5 1.5H3A1.5 1.5 0 0 1 1.5 13V3A1.5 1.5 0 0 1 3 1.5z" /><path d="M4.5 1.5v3.5h6v-3.5M4.5 14.5v-5h7v5" /></Icon>,
+  export: () => <Icon><path d="M8 10V1.5M5 4.5l3-3 3 3" /><path d="M2.5 9v3.5A1.5 1.5 0 0 0 4 14h8a1.5 1.5 0 0 0 1.5-1.5V9" /></Icon>,
+  chevronDown: () => <Icon width={10} height={10} strokeWidth={1.8}><path d="M4 6l4 4 4-4" /></Icon>,
+  flowchart: () => <Icon><rect x="5" y="1.5" width="6" height="3.5" rx="0.8" /><path d="M8 5v2.5M8 7.5 11 10 8 12.5 5 10z" /><path d="M8 12.5v2" /></Icon>,
 };
+
+// Flowchart shape icon (from the registry)
+export function ShapeIcon({ shape }: { shape: FlowShape }) {
+  const def = flowShapeOf(shape);
+  const { w, h } = def.size(28, 14);
+  // Fit in 13 x 10
+  const s = Math.min(13 / w, 10 / h, 1);
+  const bw = w * s;
+  const bh = h * s;
+  return (
+    <Icon>
+      <g transform={`translate(${(16 - bw) / 2} ${(16 - bh) / 2}) scale(${s})`} strokeWidth={1.4 / s}>
+        <path d={def.outline(w, h, 3 / s)} />
+        {def.extra && <path d={def.extra(w, h)} />}
+      </g>
+    </Icon>
+  );
+}

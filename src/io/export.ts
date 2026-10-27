@@ -2,7 +2,9 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import type { Layout } from '../core/layout';
 import type { Theme } from '../core/themes';
+import type { FlowLayout } from '../flow/layout';
 import { DiagramSvg } from '../render/DiagramSvg';
+import { FlowSvg } from '../render/FlowSvg';
 import type { ProjectData } from '../state/store';
 import { embedInPng, embedInSvg, toProjectJson } from './project';
 
@@ -16,15 +18,19 @@ export function download(data: Blob | string, fileName: string, type = 'text/pla
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-export function svgString(layout: Layout, theme: Theme, opts: { embed?: ProjectData; transparent?: boolean } = {}): string {
-  let svg = renderToStaticMarkup(createElement(DiagramSvg, { layout, theme, background: !opts.transparent }));
+// Sequence or flowchart layout
+export type AnyLayout = Layout | FlowLayout;
+
+export function svgString(layout: AnyLayout, theme: Theme, opts: { embed?: ProjectData; transparent?: boolean } = {}): string {
+  const background = !opts.transparent;
+  let svg = renderToStaticMarkup('nodes' in layout ? createElement(FlowSvg, { layout, theme, background }) : createElement(DiagramSvg, { layout, theme, background }));
   // Strip hit-test attributes
   svg = svg.replace(/ data-(kind|line|id)="[^"]*"/g, '').replace(/<path[^>]*class="hit"[^>]*(\/>|><\/path>)/g, '');
   if (opts.embed) svg = embedInSvg(svg, opts.embed);
   return `<?xml version="1.0" encoding="UTF-8"?>\n${svg}`;
 }
 
-export async function pngBlob(layout: Layout, theme: Theme, opts: { scale: number; transparent?: boolean; embed?: ProjectData }): Promise<Blob> {
+export async function pngBlob(layout: AnyLayout, theme: Theme, opts: { scale: number; transparent?: boolean; embed?: ProjectData }): Promise<Blob> {
   const svg = svgString(layout, theme, { transparent: opts.transparent });
   const img = new Image();
   img.src = URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml' }));
@@ -44,7 +50,7 @@ export async function pngBlob(layout: Layout, theme: Theme, opts: { scale: numbe
 }
 
 // PDF export
-export async function pdfBlob(layout: Layout, theme: Theme): Promise<Blob> {
+export async function pdfBlob(layout: AnyLayout, theme: Theme): Promise<Blob> {
   const [{ jsPDF }, { svg2pdf }] = await Promise.all([import('jspdf'), import('svg2pdf.js')]);
   const { width, height } = layout.bounds;
   const pdf = new jsPDF({ unit: 'pt', format: [width, height], orientation: width > height ? 'landscape' : 'portrait' });

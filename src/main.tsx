@@ -1,8 +1,9 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './App';
+import { hideBootSkeleton } from './lib/boot';
 import { restoreDraft, startDraftAutosave } from './state/draft';
-import { initAppearance } from './ui/appearance';
+import { initAppearance } from './state/appearance';
 // Bundled fonts
 import '@fontsource/space-grotesk/400.css';
 import '@fontsource/space-grotesk/500.css';
@@ -21,3 +22,4 @@ createRoot(document.getElementById('root')!).render(
     <App />
   </StrictMode>,
 );
+hideBootSkeleton();

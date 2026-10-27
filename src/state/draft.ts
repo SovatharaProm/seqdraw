@@ -1,8 +1,8 @@
 // Draft autosave
 import { emptyOverrides } from '../core/model';
+import { readJson, writeJson } from '../lib/storage';
 import { useStore } from './store';
 
-const KEY = 'seqdraw.draft.v1';
 const DEBOUNCE_MS = 300;
 
 interface Draft {
@@ -16,21 +16,12 @@ interface Draft {
 function write() {
   const { code, pending, overrides, theme, fileName, dirty } = useStore.getState();
   const draft: Draft = { code: pending ?? code, overrides, theme, fileName, dirty };
-  try {
-    localStorage.setItem(KEY, JSON.stringify(draft));
-  } catch {
-    // ignore
-  }
+  writeJson('draft', draft);
 }
 
 // Restore draft
 export function restoreDraft() {
-  let draft: Partial<Draft> | null = null;
-  try {
-    draft = JSON.parse(localStorage.getItem(KEY) ?? 'null');
-  } catch {
-    return;
-  }
+  const draft = readJson<Partial<Draft>>('draft');
   if (!draft || typeof draft.code !== 'string') return;
   const store = useStore.getState();
   store.load(

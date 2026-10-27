@@ -1,6 +1,7 @@
-export const EXAMPLES: { name: string; code: string }[] = [
+export const EXAMPLES: { name: string; group: 'Sequence' | 'Flowchart'; code: string }[] = [
   {
     name: 'Login flow',
+    group: 'Sequence',
     code: `sequenceDiagram
     title Login flow
     autonumber
@@ -23,6 +24,7 @@ export const EXAMPLES: { name: string; code: string }[] = [
   },
   {
     name: 'Prize redemption (redux-color)',
+    group: 'Sequence',
     code: `---
 config:
   theme: redux-color
@@ -48,6 +50,7 @@ sequenceDiagram
   },
   {
     name: 'Basic',
+    group: 'Sequence',
     code: `sequenceDiagram
     Alice->>John: Hello John, how are you?
     John-->>Alice: Great!
@@ -55,6 +58,7 @@ sequenceDiagram
   },
   {
     name: 'Loops & notes',
+    group: 'Sequence',
     code: `sequenceDiagram
     participant Client
     participant Server
@@ -70,6 +74,7 @@ sequenceDiagram
   },
   {
     name: 'Parallel',
+    group: 'Sequence',
     code: `sequenceDiagram
     participant Checkout
     participant Payments
@@ -84,8 +89,33 @@ sequenceDiagram
     Payments-->>-Checkout: Charged`,
   },
   {
-    name: 'Blank',
-    code: `sequenceDiagram
-    `,
+    name: 'Order process',
+    group: 'Flowchart',
+    code: `flowchart TD
+    Start([Order received]) --> Stock{In stock?}
+    Stock -->|yes| Pay[Charge card]
+    Stock -->|no| Back[Back-order]
+    Pay --> Ok{Payment ok?}
+    Ok -->|yes| Ship[[Ship order]]
+    Ok -->|no| Notify[/Email customer/]
+    Back --> Notify
+    Ship --> Done([Done])
+    Notify --> Done`,
+  },
+  {
+    name: 'CI pipeline (subgraphs)',
+    group: 'Flowchart',
+    code: `flowchart LR
+    Push([git push]) --> Build
+    subgraph ci [Continuous integration]
+        Build[Build] --> Test[Unit tests]
+        Test --> Lint[Lint]
+    end
+    subgraph cd [Delivery]
+        Stage[Deploy staging] -.-> Smoke{Smoke ok?}
+        Smoke ==>|yes| Prod[(Production)]
+    end
+    Lint --> Stage
+    Smoke -->|no| Push`,
   },
 ];

@@ -5,9 +5,83 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
     <title>SeqDraw — sequence diagrams, no login</title>
+    <script>
+      // Boot: appearance and panel layout before first paint (keys match src/lib/storage.ts)
+      (function () {
+        try {
+          var a = localStorage.getItem('seqdraw.appearance');
+          if (a === 'light' || a === 'dark') document.documentElement.setAttribute('data-theme', a);
+          var root = document.documentElement.style;
+          var split = Number(localStorage.getItem('seqdraw.code.split'));
+          if (split > 0) root.setProperty('--boot-split', split + '%');
+          if (localStorage.getItem('seqdraw.code.open') === '0') document.documentElement.setAttribute('data-boot-code', 'closed');
+        } catch (e) {}
+      })();
+    </script>
+    <style>
+      /* Boot skeleton */
+      #boot {
+        --b-bg: #f6f7fb; --b-panel: #ffffff; --b-border: #e3e5ef; --b-block: #eceef5; --b-shine: rgba(255, 255, 255, 0.7); --b-accent: #4f46e5;
+        position: fixed; inset: 0; z-index: 100; display: flex; flex-direction: column; background: var(--b-bg);
+        transition: opacity 220ms ease-out;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root:not([data-theme='light']) #boot { --b-bg: #0d0e15; --b-panel: #151722; --b-border: #262938; --b-block: #20232f; --b-shine: rgba(255, 255, 255, 0.05); --b-accent: #818cf8; }
+      }
+      :root[data-theme='dark'] #boot { --b-bg: #0d0e15; --b-panel: #151722; --b-border: #262938; --b-block: #20232f; --b-shine: rgba(255, 255, 255, 0.05); --b-accent: #818cf8; }
+      #boot.done { opacity: 0; pointer-events: none; }
+      #boot .b { background: var(--b-block); border-radius: 6px; position: relative; overflow: hidden; flex: none; }
+      #boot .b::after {
+        content: ''; position: absolute; inset: 0; transform: translateX(-100%);
+        background: linear-gradient(90deg, transparent, var(--b-shine), transparent);
+        animation: b-shine 1.4s ease-in-out infinite;
+      }
+      @keyframes b-shine { to { transform: translateX(100%); } }
+      @media (prefers-reduced-motion: reduce) { #boot .b::after { animation: none; } }
+      #boot .b-bar { height: 43px; box-sizing: border-box; display: flex; align-items: center; gap: 10px; padding: 0 12px; background: var(--b-panel); border-bottom: 1px solid var(--b-border); }
+      #boot .b-logo { width: 22px; height: 22px; border-radius: 7px; background: var(--b-accent); opacity: 0.85; flex: none; }
+      #boot .b-main { flex: 1; display: flex; min-height: 0; }
+      #boot .b-code { width: var(--boot-split, 34%); background: var(--b-panel); border-right: 1px solid var(--b-border); padding: 52px 20px 0; display: flex; flex-direction: column; gap: 12px; }
+      :root[data-boot-code='closed'] #boot .b-code { display: none; }
+      #boot .b-canvas { flex: 1; position: relative; }
+      #boot .b-dock { position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%); width: min(420px, 70%); height: 44px; border-radius: 12px; background: var(--b-panel); border: 1px solid var(--b-border); }
+      @media (max-width: 720px) { #boot .b-code { display: none; } }
+    </style>
   </head>
   <body>
     <div id="root"></div>
+    <div id="boot" aria-hidden="true">
+      <div class="b-bar">
+        <span class="b-logo"></span>
+        <span class="b" style="width: 72px; height: 14px"></span>
+        <span class="b" style="width: 110px; height: 14px; margin-right: 24px"></span>
+        <span class="b" style="width: 58px; height: 26px"></span>
+        <span class="b" style="width: 64px; height: 26px"></span>
+        <span class="b" style="width: 62px; height: 26px; background: var(--b-accent); opacity: 0.35"></span>
+        <span class="b" style="width: 74px; height: 26px"></span>
+      </div>
+      <div class="b-main">
+        <div class="b-code">
+          <span class="b" style="width: 46%; height: 12px"></span>
+          <span class="b" style="width: 64%; height: 12px; margin-left: 24px"></span>
+          <span class="b" style="width: 52%; height: 12px; margin-left: 24px"></span>
+          <span class="b" style="width: 70%; height: 12px; margin-left: 24px"></span>
+          <span class="b" style="width: 40%; height: 12px; margin-left: 24px"></span>
+          <span class="b" style="width: 58%; height: 12px; margin-left: 24px"></span>
+          <span class="b" style="width: 34%; height: 12px; margin-left: 48px"></span>
+          <span class="b" style="width: 50%; height: 12px; margin-left: 24px"></span>
+        </div>
+        <div class="b-canvas">
+          <span class="b" style="position: absolute; left: 22%; top: 18%; width: 120px; height: 44px"></span>
+          <span class="b" style="position: absolute; left: 46%; top: 18%; width: 120px; height: 44px"></span>
+          <span class="b" style="position: absolute; left: 70%; top: 18%; width: 120px; height: 44px"></span>
+          <span class="b" style="position: absolute; left: 26%; top: 36%; width: 24%; height: 6px"></span>
+          <span class="b" style="position: absolute; left: 50%; top: 50%; width: 24%; height: 6px"></span>
+          <span class="b" style="position: absolute; left: 26%; top: 64%; width: 48%; height: 6px"></span>
+          <span class="b-dock"></span>
+        </div>
+      </div>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

@@ -1,29 +1,24 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type PointerEvent as RPointerEvent } from 'react';
-import { dropLine, nearestParticipant, type Layout } from '../core/layout';
-import { shapeOf } from '../core/participants';
+import { nearestParticipant } from '../core/layout';
 import { contentEnd } from '../core/ops';
-import { FONT_FAMILY, FONT_SIZE, LINE_HEIGHT } from '../core/measure';
-import { THEMES, type Theme } from '../core/themes';
-import { DiagramContent, selfPath, StatementShape } from '../render/DiagramSvg';
+import { THEMES } from '../core/themes';
+import { DiagramContent } from '../render/DiagramSvg';
+import { FlowContent } from '../render/FlowSvg';
+import { nodeAt } from '../flow/layout';
 import * as actions from '../state/actions';
+import * as flowActions from '../state/flowActions';
+import { alignNode, edgeEndAt, EndHover, FlowDragOverlay, FlowHandles, FlowSelectionOverlay, snapTarget, type FlowDrag } from './FlowOverlay';
+import type { Side } from '../flow/model';
 import { Icons } from '../ui/icons';
-import { selectionForLine, useStore, type EditTarget, type Selection } from '../state/store';
+import { lineSelection, useStore } from '../state/store';
+import { inkOf, InlineEditor } from './InlineEditor';
+import { DragOverlay, SelectionOverlay } from './SequenceOverlay';
+import type { Drag, Pt, View } from './types';
 
-type View = { x: number; y: number; k: number };
-type Pt = { x: number; y: number };
-
-type Drag =
-  | { type: 'pan'; start: Pt; view: View; moved: boolean; clear: boolean }
-  | { type: 'participant'; id: string; start: Pt; origX: number; dx: number; moved: boolean }
-  | { type: 'statement'; line: number; start: Pt; x: number; y: number; moved: boolean }
-  | { type: 'resize'; id: string; start: Pt; w: number; h: number; dw: number; dh: number }
-  | { type: 'connect'; from: string; start: Pt; to: Pt }
-  | { type: 'reconnect'; line: number; end: 'from' | 'to'; start: Pt; to: Pt };
 
 const MIN_K = 0.1;
 const MAX_K = 4;
 const DRAG_THRESHOLD = 4;
-const SELF_W = 40;
 
 export const requestFit = () => window.dispatchEvent(new Event('seqdraw:fit'));
 
@@ -32,40 +27,13 @@ const isTyping = () => {
   return !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable);
 };
 
-// Inline editor box
-function editBox(layout: Layout, t: EditTarget): { x: number; y: number; w: number; h: number; multiline: boolean } | null | undefined {
-  if (t.kind === 'participant') {
-    const p = layout.participants.find((q) => q.id === t.id);
-    return p && { x: p.x - p.width / 2, y: p.top + (shapeOf(p.kind).icon ? p.height - LINE_HEIGHT - 4 : (p.height - 28) / 2), w: p.width, h: 28, multiline: false };
-  }
-  if (t.kind === 'message') {
-    const m = layout.messages.find((q) => q.line === t.line);
-    if (!m) return null;
-    const cx = m.self ? m.x1 + SELF_W / 2 : (m.x1 + m.x2) / 2;
-    const w = Math.max(160, Math.abs(m.x2 - m.x1) - 20);
-    return { x: cx - w / 2, y: m.textY - 4, w, h: Math.max(28, m.text.length * LINE_HEIGHT + 8), multiline: true };
-  }
-  if (t.kind === 'note') {
-    const n = layout.notes.find((q) => q.line === t.line);
-    return n && { x: n.x, y: n.y, w: Math.max(n.width, 140), h: Math.max(n.height, 36), multiline: true };
-  }
-  if (t.kind === 'frame') {
-    const f = layout.frames.find((q) => q.line === t.line);
-    return f && { x: f.x1 + 50, y: f.y1 - 4, w: Math.max(160, f.x2 - f.x1 - 60), h: 28, multiline: false };
-  }
-  for (const f of layout.frames) {
-    const s = f.sections.find((q) => q.line === t.line);
-    if (s) return { x: (f.x1 + f.x2) / 2 - 90, y: s.y - 2, w: 180, h: 28, multiline: false };
-  }
-  return null;
-}
-
 export function Canvas() {
   const layout = useStore((s) => s.layout);
   const theme = THEMES[useStore((s) => s.theme)] ?? THEMES.default;
   const selection = useStore((s) => s.selection);
   const editing = useStore((s) => s.editing);
   const doc = useStore((s) => s.doc);
+  const flowLayout = useStore((s) => s.flowLayout);
 
   const box = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
@@ -75,6 +43,8 @@ export function Canvas() {
   const [drag, setDrag] = useState<Drag | null>(null);
   const dragRef = useRef<Drag | null>(null);
   const [hover, setHover] = useState<{ id: string; x: number; y: number } | null>(null);
+  const [flowHover, setFlowHover] = useState<string | null>(null);
+  const [endHover, setEndHover] = useState<Pt | null>(null);
   const [spaceDown, setSpaceDown] = useState(false);
   const [panMode, setPanMode] = useState(false);
   const panning = spaceDown || panMode;
@@ -102,7 +72,8 @@ export function Canvas() {
   const fit = useCallback(() => {
     const el = box.current;
     if (!el) return;
-    const { bounds: b } = useStore.getState().layout;
+    const st = useStore.getState();
+    const b = (st.flowLayout ?? st.layout).bounds;
     const r = el.getBoundingClientRect();
     // Dock and badge offsets
     const dock = el.parentElement?.querySelector<HTMLElement>('.palette');
@@ -160,7 +131,7 @@ export function Canvas() {
         else select(null);
       } else if ((e.key === 'Enter' || e.key === 'F2') && sel) {
         e.preventDefault();
-        setEditing(sel.kind === 'participant' ? sel : { kind: sel.kind, line: sel.line });
+        setEditing(sel);
       } else if ((e.key === '=' || e.key === '+') && !e.metaKey && !e.ctrlKey) zoomAt(1.2);
       else if (e.key === '-' && !e.metaKey && !e.ctrlKey) zoomAt(1 / 1.2);
     };
@@ -187,6 +158,8 @@ export function Canvas() {
       return updateDrag({ type: 'pan', start: { x: e.clientX, y: e.clientY }, view, moved: false, clear: false });
     }
     if (e.button !== 0) return;
+
+    if (useStore.getState().flowLayout) return flowPointerDown(target, p, { x: e.clientX, y: e.clientY }, e.altKey);
 
     const handle = target.closest<SVGElement>('[data-handle]');
     if (handle) {
@@ -219,15 +192,58 @@ export function Canvas() {
       return updateDrag({ type: 'statement', line, start, x: p.x, y: p.y, moved: false });
     }
     if (kind === 'branch') {
-      select(selectionForLine(useStore.getState().doc, line));
+      select(lineSelection(useStore.getState(), line));
       return;
     }
     updateDrag({ type: 'pan', start: { x: e.clientX, y: e.clientY }, view, moved: false, clear: true });
   };
 
+  // Flowchart pointer down
+  const flowPointerDown = (target: Element, p: Pt, client: Pt, alt: boolean) => {
+    const { select, flowLayout: FL } = useStore.getState();
+    const handle = target.closest<SVGElement>('[data-handle]');
+    const h = handle?.dataset.handle;
+    // Grab any arrow end (Alt on a dot: new link)
+    const found = FL && !(alt && h === 'flow-connect') && h !== 'from' && h !== 'to' ? edgeEndAt(FL, p, view.k) : null;
+    // On a dot, only arrow tips win; tails start a new link
+    const grab = found && !(h === 'flow-connect' && found.end === 'from') ? found : null;
+    if (grab) {
+      const e = FL!.edges.find((q) => q.index === grab.index)!;
+      select({ kind: 'edge', index: e.index, line: e.line });
+      setEndHover(null);
+      return updateDrag({ type: 'flow-reconnect', index: e.index, end: grab.end, start: p, to: p });
+    }
+    if (h === 'flow-connect') {
+      const start = { x: Number(handle!.dataset.x), y: Number(handle!.dataset.y) };
+      return updateDrag({ type: 'flow-connect', from: handle!.dataset.id!, fromSide: handle!.dataset.side as Side, start, to: p });
+    }
+    if ((h === 'from' || h === 'to') && selection?.kind === 'edge') return updateDrag({ type: 'flow-reconnect', index: selection.index, end: h, start: p, to: p });
+    const el = target.closest<SVGElement>('[data-kind]');
+    const kind = el?.dataset.kind;
+    if (kind === 'node') {
+      const id = el!.dataset.id!;
+      select({ kind: 'node', id });
+      return updateDrag({ type: 'node', id, start: p, dx: 0, dy: 0, moved: false });
+    }
+    if (kind === 'edge') return select({ kind: 'edge', index: Number(el!.dataset.id), line: Number(el!.dataset.line) });
+    if (kind === 'subgraph') return select({ kind: 'subgraph', id: el!.dataset.id! });
+    updateDrag({ type: 'pan', start: client, view, moved: false, clear: true });
+  };
+
   const onPointerMove = (e: RPointerEvent<SVGSVGElement>) => {
     const d = dragRef.current;
     const p = toDiagram(e.clientX, e.clientY);
+    const FL = useStore.getState().flowLayout;
+    if (!d && FL) {
+      // Node hover handles
+      const n = nodeAt(FL, p, 14 / view.k);
+      if ((n?.id ?? null) !== flowHover) setFlowHover(n?.id ?? null);
+      const onDot = !!(e.target as Element).closest('[data-handle="flow-connect"]');
+      const found = e.altKey ? null : edgeEndAt(FL, p, view.k);
+      const end = found && !(onDot && found.end === 'from') ? found : null;
+      if (end?.point.x !== endHover?.x || end?.point.y !== endHover?.y) setEndHover(end?.point ?? null);
+      return;
+    }
     if (!d) {
       // Lifeline hover dot
       const overElement = (e.target as Element).closest('[data-kind], [data-handle]');
@@ -259,8 +275,16 @@ export function Canvas() {
         break;
       case 'connect':
       case 'reconnect':
+      case 'flow-connect':
+      case 'flow-reconnect':
         updateDrag({ ...d, to: p });
         break;
+      case 'node': {
+        // Snap to other nodes' centers
+        const a = FL && !e.altKey ? alignNode(FL, d.id, p.x - d.start.x, p.y - d.start.y, view.k) : { dx: p.x - d.start.x, dy: p.y - d.start.y };
+        updateDrag({ ...d, dx: a.dx, dy: a.dy, guideX: a.guideX, guideY: a.guideY, moved: d.moved || moved(d.start) });
+        break;
+      }
     }
   };
 
@@ -296,6 +320,24 @@ export function Canvas() {
         if (tgt && Math.abs(tgt.x - d.to.x) < 60) actions.updateStatement(d.line, { [d.end]: tgt.id });
         break;
       }
+      case 'node':
+        if (d.moved) flowActions.moveNode(d.id, d.dx, d.dy);
+        break;
+      case 'flow-connect': {
+        const snap = flowLayout && snapTarget(flowLayout, d.to, view.k);
+        const travelled = Math.hypot(d.to.x - d.start.x, d.to.y - d.start.y);
+        if (snap && (snap.node.id !== d.from || travelled > 30)) flowActions.connectNodes(d.from, snap.node.id, { from: d.fromSide, to: snap.side });
+        else if (!snap && travelled > 40) flowActions.connectToNew(d.from, d.to, d.fromSide);
+        setFlowHover(null);
+        break;
+      }
+      case 'flow-reconnect': {
+        const snap = flowLayout && snapTarget(flowLayout, d.to, view.k);
+        if (snap) flowActions.reconnectEdge(d.index, d.end, snap.node.id, snap.side);
+        // Empty canvas: leave the end there
+        else if (Math.hypot(d.to.x - d.start.x, d.to.y - d.start.y) > 8 / view.k) flowActions.detachEdge(d.index, d.end, d.to);
+        break;
+      }
     }
   };
 
@@ -305,6 +347,8 @@ export function Canvas() {
     const kind = el?.dataset.kind;
     const line = Number(el?.dataset.line);
     const { setEditing } = useStore.getState();
+    if (kind === 'node' || kind === 'subgraph') return setEditing({ kind, id: el!.dataset.id! });
+    if (kind === 'edge') return setEditing({ kind, index: Number(el!.dataset.id), line });
     if (kind === 'participant') setEditing({ kind: 'participant', id: el!.dataset.id! });
     else if (kind === 'message' || kind === 'note' || kind === 'branch') setEditing({ kind, line });
     else if (kind === 'frame' || kind === 'frame-label') {
@@ -332,7 +376,9 @@ export function Canvas() {
   const accent = 'var(--accent)';
   const grid = theme.grid ?? `color-mix(in srgb, ${theme.text} ${theme.gridStyle === 'lines' ? 14 : 22}%, ${theme.background})`;
   const gridFine = `color-mix(in srgb, ${grid} 45%, transparent)`;
-  const cursor = panning || drag?.type === 'pan' ? (drag ? 'grabbing' : 'grab') : drag?.type === 'participant' ? 'ew-resize' : drag?.type === 'statement' ? 'grabbing' : 'default';
+  const cursor = panning || drag?.type === 'pan' ? (drag ? 'grabbing' : 'grab') : drag?.type === 'participant' ? 'ew-resize' : drag?.type === 'statement' || (drag?.type === 'node' && drag.moved) ? 'grabbing' : 'default';
+  const hoverNode = flowLayout && !drag && !panning ? flowLayout.nodes.find((n) => n.id === flowHover) : undefined;
+  const flowCursor = endHover && !drag && !panning ? 'move' : cursor;
 
   return (
     <div
@@ -367,19 +413,23 @@ export function Canvas() {
         ref={svgRef}
         width="100%"
         height="100%"
-        style={{ cursor }}
+        style={{ cursor: flowCursor }}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
-        onPointerLeave={() => !dragRef.current && setHover(null)}
+        onPointerLeave={() => !dragRef.current && (setHover(null), setFlowHover(null), setEndHover(null))}
         onDoubleClick={onDoubleClick}
       >
         <g transform={`translate(${view.x} ${view.y}) scale(${k})`}>
           {drag?.type === 'statement' && drag.moved && <style>{`.diagram-main [data-line="${drag.line}"] { opacity: 0.25; }`}</style>}
+          {drag?.type === 'node' && drag.moved && <style>{`.diagram-main [data-kind="node"][data-id="${CSS.escape(drag.id)}"] { opacity: 0.25; }`}</style>}
           <g className="diagram-main">
-            <DiagramContent layout={layout} theme={theme} background={false} />
+            {flowLayout ? <FlowContent layout={flowLayout} theme={theme} background={false} /> : <DiagramContent layout={layout} theme={theme} background={false} />}
           </g>
-          <SelectionOverlay layout={layout} selection={selection} k={k} />
+          {hoverNode && <FlowHandles node={hoverNode} k={k} />}
+          {endHover && !drag && !panning && <EndHover point={endHover} k={k} />}
+          {/* Link end handles above connect dots */}
+          {flowLayout ? <FlowSelectionOverlay layout={flowLayout} selection={selection} k={k} /> : <SelectionOverlay layout={layout} selection={selection} k={k} />}
           {hover && !drag && !panning && (
             <g data-handle="connect" style={{ cursor: 'crosshair' }}>
               <circle cx={hover.x} cy={hover.y} r={12 / k} fill="transparent" />
@@ -387,10 +437,11 @@ export function Canvas() {
               <title>Drag to another lifeline to add a message</title>
             </g>
           )}
-          {drag && <DragOverlay drag={drag} layout={layout} theme={theme} k={k} end={contentEnd(doc.lines)} />}
+          {drag && flowLayout && <FlowDragOverlay drag={drag as FlowDrag} layout={flowLayout} theme={theme} k={k} />}
+          {drag && !flowLayout && <DragOverlay drag={drag} layout={layout} theme={theme} k={k} end={contentEnd(doc.lines)} />}
         </g>
       </svg>
-      {editing && <InlineEditor target={editing} layout={layout} view={view} fontFamily={theme.fontFamily} />}
+      {editing && <InlineEditor target={editing} layout={layout} flow={flowLayout} view={view} fontFamily={theme.fontFamily} ink={inkOf(flowLayout, editing, theme.text)} />}
       <div className="zoom-controls" role="toolbar" aria-label="Zoom">
         <button className={panMode ? 'active' : ''} aria-pressed={panMode} title="Hand tool: drag anywhere to pan (or hold Space)" aria-label="Hand tool" onClick={() => setPanMode(!panMode)}><Icons.hand /></button>
         <span className="zoom-sep" />
@@ -400,164 +451,5 @@ export function Canvas() {
         <button title="Fit diagram (⌘0)" aria-label="Fit diagram" onClick={fit}><Icons.fit /></button>
       </div>
     </div>
-  );
-}
-
-function SelectionOverlay({ layout, selection, k }: { layout: Layout; selection: Selection | null; k: number }) {
-  if (!selection) return null;
-  const pad = 4;
-  const sw = 2 / k;
-  const style = { fill: 'none', stroke: 'var(--accent)', strokeWidth: sw, pointerEvents: 'none' as const };
-  if (selection.kind === 'participant') {
-    const p = layout.participants.find((q) => q.id === selection.id);
-    if (!p) return null;
-    const x = p.x - p.width / 2;
-    const hs = 10 / k;
-    return (
-      <g>
-        <rect x={x - pad} y={p.top - pad} width={p.width + pad * 2} height={p.height + pad * 2} rx={4} {...style} />
-        <rect x={x - pad} y={p.bottom - pad} width={p.width + pad * 2} height={p.height + pad * 2} rx={4} {...style} />
-        <rect data-handle="resize" x={x + p.width - hs / 2} y={p.top + p.height - hs / 2} width={hs} height={hs} fill="white" stroke="var(--accent)" strokeWidth={sw} style={{ cursor: 'nwse-resize' }}>
-          <title>Drag to resize</title>
-        </rect>
-      </g>
-    );
-  }
-  if (selection.kind === 'message') {
-    const m = layout.messages.find((q) => q.line === selection.line);
-    if (!m) return null;
-    const endY = m.self ? m.y + 28 : m.y;
-    const d = m.self ? selfPath(m.x1, m.y, m.x2) : `M${m.x1} ${m.y} H${m.x2}`;
-    const r = 6 / k;
-    return (
-      <g>
-        <path d={d} {...style} strokeWidth={4 / k} opacity={0.35} />
-        <circle data-handle="from" cx={m.x1} cy={m.y} r={r} fill="white" stroke="var(--accent)" strokeWidth={sw} style={{ cursor: 'move' }}>
-          <title>Drag to another lifeline to change the sender</title>
-        </circle>
-        <circle data-handle="to" cx={m.x2} cy={endY} r={r} fill="var(--accent)" stroke="white" strokeWidth={sw} style={{ cursor: 'move' }}>
-          <title>Drag to another lifeline to change the receiver</title>
-        </circle>
-      </g>
-    );
-  }
-  if (selection.kind === 'note') {
-    const n = layout.notes.find((q) => q.line === selection.line);
-    return n ? <rect x={n.x - pad} y={n.y - pad} width={n.width + pad * 2} height={n.height + pad * 2} rx={3} {...style} /> : null;
-  }
-  const f = layout.frames.find((q) => q.line === selection.line);
-  return f ? <rect x={f.x1 - pad} y={f.y1 - pad} width={f.x2 - f.x1 + pad * 2} height={f.y2 - f.y1 + pad * 2} rx={3} {...style} strokeDasharray={`${6 / k} ${4 / k}`} /> : null;
-}
-
-function DragOverlay({ drag: d, layout, theme, k, end }: { drag: Drag; layout: Layout; theme: Theme; k: number; end: number }) {
-  const accent = 'var(--accent)';
-  const sw = 2 / k;
-  const none = { pointerEvents: 'none' as const };
-  if (d.type === 'participant' && d.moved) {
-    const p = layout.participants.find((q) => q.id === d.id)!;
-    const x = d.origX + d.dx;
-    return (
-      <g style={none} opacity={0.75}>
-        <rect x={x - p.width / 2} y={p.top} width={p.width} height={p.height} rx={3} fill="var(--accent-soft)" stroke={accent} strokeWidth={sw} strokeDasharray={`${6 / k} ${4 / k}`} />
-        <line x1={x} x2={x} y1={p.top + p.height} y2={p.bottom} stroke={accent} strokeWidth={sw} strokeDasharray={`${4 / k} ${4 / k}`} />
-        <text x={x} y={p.top + p.height / 2 + 5} textAnchor="middle" fontFamily={FONT_FAMILY} fontSize={FONT_SIZE} fill="var(--text)">{p.label}</text>
-      </g>
-    );
-  }
-  if (d.type === 'statement' && d.moved) {
-    const target = dropLine(layout, d.y, end);
-    const slot = layout.slots.find((s) => s.line === target);
-    const y = slot ? slot.y1 : layout.lifelineBottom - 10;
-    const x1 = layout.bounds.x + 10;
-    const x2 = layout.bounds.x + layout.bounds.width - 10;
-    const block = layout.frames.some((f) => f.line === d.line);
-    const gx = block ? 0 : (actions.horizontalShift(d.line, d.x - d.start.x)?.dx ?? 0);
-    return (
-      <g style={none}>
-        <g transform={`translate(${gx} ${d.y - d.start.y})`} opacity={0.85}>
-          <StatementShape layout={layout} line={d.line} theme={theme} />
-        </g>
-        <line x1={x1} x2={x2} y1={y} y2={y} stroke={accent} strokeWidth={3 / k} />
-        <circle cx={x1} cy={y} r={5 / k} fill={accent} />
-        <line x1={x1} x2={x2} y1={d.y} y2={d.y} stroke={accent} strokeWidth={1 / k} strokeDasharray={`${4 / k} ${4 / k}`} opacity={0.6} />
-      </g>
-    );
-  }
-  if (d.type === 'resize') {
-    const p = layout.participants.find((q) => q.id === d.id)!;
-    const w = Math.max(40, d.w + d.dw);
-    const h = Math.max(30, d.h + d.dh);
-    return <rect style={none} x={p.x - w / 2} y={p.top} width={w} height={h} fill="none" stroke={accent} strokeWidth={sw} strokeDasharray={`${6 / k} ${4 / k}`} />;
-  }
-  if (d.type === 'connect' || d.type === 'reconnect') {
-    let from: { x: number; y: number };
-    if (d.type === 'connect') from = d.start;
-    else {
-      const m = layout.messages.find((q) => q.line === d.line)!;
-      from = d.end === 'to' ? { x: m.x1, y: m.y } : { x: m.x2, y: m.y };
-    }
-    const tgt = nearestParticipant(layout, d.to.x);
-    const snap = tgt && Math.abs(tgt.x - d.to.x) < 60 ? tgt : null;
-    const toX = snap ? snap.x : d.to.x;
-    const toY = d.type === 'connect' ? from.y : d.to.y;
-    return (
-      <g style={none}>
-        {snap && <line x1={snap.x} x2={snap.x} y1={layout.lifelineTop} y2={layout.lifelineBottom} stroke={accent} strokeWidth={4 / k} opacity={0.25} />}
-        <line x1={from.x} y1={from.y} x2={toX} y2={toY} stroke={accent} strokeWidth={sw} strokeDasharray={`${6 / k} ${4 / k}`} />
-        <circle cx={toX} cy={toY} r={5 / k} fill={accent} />
-      </g>
-    );
-  }
-  return null;
-}
-
-function InlineEditor({ target, layout, view, fontFamily }: { target: EditTarget; layout: Layout; view: View; fontFamily: string }) {
-  const [value, setValue] = useState(() => actions.editText(target));
-  const ref = useRef<HTMLTextAreaElement>(null);
-  const done = useRef(false);
-  const b = editBox(layout, target);
-
-  useEffect(() => {
-    ref.current?.focus();
-    ref.current?.select();
-  }, []);
-
-  if (!b) return null;
-  const finish = (save: boolean) => {
-    if (done.current) return;
-    done.current = true;
-    useStore.getState().setEditing(null);
-    if (save && value !== actions.editText(target)) actions.setText(target, value);
-  };
-  const rows = Math.max(1, value.split('\n').length);
-
-  return (
-    <textarea
-      ref={ref}
-      className="inline-editor"
-      value={value}
-      rows={rows}
-      spellCheck={false}
-      placeholder={target.kind === 'message' ? 'Message text' : ''}
-      style={{
-        left: b.x * view.k + view.x,
-        top: b.y * view.k + view.y,
-        width: b.w * view.k,
-        minHeight: b.h * view.k,
-        fontSize: FONT_SIZE * view.k,
-        fontFamily,
-        lineHeight: `${LINE_HEIGHT * view.k}px`,
-      }}
-      onChange={(e) => setValue(e.target.value)}
-      onBlur={() => finish(true)}
-      onKeyDown={(e) => {
-        e.stopPropagation();
-        if (e.key === 'Escape') finish(false);
-        else if (e.key === 'Enter' && (!e.shiftKey || !b.multiline)) {
-          e.preventDefault();
-          finish(true);
-        }
-      }}
-    />
   );
 }
