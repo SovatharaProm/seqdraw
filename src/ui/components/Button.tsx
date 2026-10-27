@@ -1,11 +1,12 @@
 import type { ButtonHTMLAttributes, ReactNode } from 'react';
+import { keys } from '../../lib/platform';
 
 type Props = Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'title'> & { label: string; shortcut?: string; children: ReactNode };
 
 // Icon-only button: label is the tooltip and the accessible name
 export function IconButton({ label, shortcut, className = '', children, ...rest }: Props) {
   return (
-    <button type="button" className={`icon-btn ${className}`} title={shortcut ? `${label} (${shortcut})` : label} aria-label={label} {...rest}>
+    <button type="button" className={`icon-btn ${className}`} title={shortcut ? `${label} (${keys(shortcut)})` : label} aria-label={label} {...rest}>
       {children}
     </button>
   );

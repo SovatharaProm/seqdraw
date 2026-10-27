@@ -1,24 +1,110 @@
 // Flowchart canvas overlays
 import type { Theme } from '../core/themes';
-import { nearestSide, nodeAt, orthoRoute, portPoint, SIDES, type FlowLayout, type FNode, type Pt } from '../flow/layout';
+import { editableEdge, facingSide, midpoint, movedRoute, nodeAt, orthoRoute, portPoint, sideAt, sidePoint, SIDES, type FlowLayout, type FNode, type Pt } from '../flow/layout';
 import type { Side } from '../flow/model';
-import { edgePath, FlowNodeShape, roundedPath } from '../render/FlowSvg';
+import { edgePath, FlowNodeShape, linePath, roundedPath, smoothPath } from '../render/FlowSvg';
 import type { Selection } from '../state/store';
 
 export type FlowDrag =
   | { type: 'node'; id: string; start: Pt; dx: number; dy: number; moved: boolean; guideX?: number; guideY?: number }
-  | { type: 'flow-connect'; from: string; fromSide: Side; start: Pt; to: Pt }
-  | { type: 'flow-reconnect'; index: number; end: 'from' | 'to'; start: Pt; to: Pt };
+  | { type: 'flow-connect'; from: string; fromSide: Side; start: Pt; to: Pt; free?: boolean }
+  | { type: 'flow-reconnect'; index: number; end: 'from' | 'to'; start: Pt; to: Pt; free?: boolean }
+  // Drag one segment of a link's route
+  | { type: 'flow-segment'; index: number; seg: number; pts: Pt[]; sides: [Side, Side]; axis: 'x' | 'y'; start: Pt; delta: number }
+  // Move or add a bend
+  | { type: 'flow-bend'; index: number; bends: Pt[]; i: number; insert: boolean; at: Pt; moved: boolean };
 
 const none = { pointerEvents: 'none' as const };
 const SNAP = 6;
 
-// Node side under the pointer
-export function snapTarget(layout: FlowLayout, p: Pt, k: number): { node: FNode; side: Side; point: Pt } | null {
+// Snap distance (screen px)
+const SPOT_SNAP = 6;
+
+// Side and spot under the pointer (snaps to the middle and to `toward`; `free`: no snap)
+export function snapTarget(layout: FlowLayout, p: Pt, k: number, opts: { toward?: Pt; free?: boolean } = {}): { node: FNode; side: Side; at: number; point: Pt } | null {
   const node = nodeAt(layout, p, 14 / k);
   if (!node) return null;
-  const side = nearestSide(node, p);
-  return { node, side, point: portPoint(node, side) };
+  const side = facingSide(node, p);
+  const snap = opts.free ? 0 : SPOT_SNAP / k;
+  const q = { ...p };
+  const t = opts.toward;
+  if (t && !opts.free) {
+    // Line up with the other end
+    if (side === 'left' || side === 'right') {
+      if (Math.abs(q.y - t.y) <= snap && Math.abs(t.y - node.y) <= node.height / 2) q.y = t.y;
+    } else if (Math.abs(q.x - t.x) <= snap && Math.abs(t.x - node.x) <= node.width / 2) q.x = t.x;
+  }
+  const aligned = q.x !== p.x || q.y !== p.y;
+  const at = sideAt(node, side, q, aligned ? 0 : snap);
+  return { node, side, at, point: sidePoint(node, side, at) };
+}
+
+// Bends after a move or insert
+export function bendsAfter(d: { bends: Pt[]; i: number; insert: boolean; at: Pt }): Pt[] {
+  const out = d.bends.slice();
+  out.splice(d.i, d.insert ? 0 : 1, d.at);
+  return out;
+}
+
+// Line a bend up with its neighbours
+export function snapBend(pts: Pt[], p: Pt, k: number): Pt {
+  const r = { ...p };
+  for (const q of pts) {
+    if (Math.abs(q.x - p.x) < SNAP / k) r.x = q.x;
+    if (Math.abs(q.y - p.y) < SNAP / k) r.y = q.y;
+  }
+  return r;
+}
+
+// Draggable dot with a wider hit area
+function Dot({ at, k, r = 4, hollow, cursor, tip, data }: { at: Pt; k: number; r?: number; hollow?: boolean; cursor: string; tip: string; data: Record<string, string | number> }) {
+  const attrs = Object.fromEntries(Object.entries(data).map(([key, v]) => [`data-${key}`, v]));
+  return (
+    <g {...attrs} style={{ cursor }}>
+      <circle cx={at.x} cy={at.y} r={(r + 5) / k} fill="transparent" />
+      <circle cx={at.x} cy={at.y} r={r / k} fill={hollow ? 'white' : 'var(--accent)'} stroke={hollow ? 'var(--accent)' : 'white'} strokeWidth={1.5 / k} />
+      <title>{tip}</title>
+    </g>
+  );
+}
+
+const mid = (a: Pt, b: Pt) => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
+
+// Bends (solid) and add spots (hollow)
+function BendHandles({ e, k }: { e: FlowLayout['edges'][number]; k: number }) {
+  const pts = e.points;
+  return (
+    <g>
+      {pts.slice(0, -1).map((a, i) =>
+        Math.hypot(pts[i + 1].x - a.x, pts[i + 1].y - a.y) < 24 / k ? null : (
+          <Dot key={`n${i}`} at={mid(a, pts[i + 1])} k={k} r={3.5} hollow cursor="copy" tip="Drag to add a bend" data={{ handle: 'bend-new', i }} />
+        ),
+      )}
+      {pts.slice(1, -1).map((p, i) => (
+        <Dot key={`b${i}`} at={p} k={k} r={4.5} cursor="move" tip="Drag to move, double-click to remove" data={{ handle: 'bend', i }} />
+      ))}
+    </g>
+  );
+}
+
+// Segment handles (a curve: one in the middle)
+function SegmentHandles({ layout, index, k }: { layout: FlowLayout; index: number; k: number }) {
+  const e = layout.edges.find((q) => q.index === index);
+  if (e && (e.shape === 'straight' || e.shape === 'curved')) return <BendHandles e={e} k={k} />;
+  const ed = e && editableEdge(layout, e);
+  if (!e || !ed) return null;
+  const tip = 'Drag to move this part of the link';
+  if (!e.ortho) return <Dot at={midpoint(e.points)} k={k} cursor="move" tip={tip} data={{ handle: 'segment', seg: 'auto' }} />;
+  const pts = ed.pts;
+  return (
+    <g>
+      {pts.slice(1, -2).map((a, j) => {
+        const b = pts[j + 2];
+        if (Math.hypot(b.x - a.x, b.y - a.y) < 14 / k) return null;
+        return <Dot key={j} at={mid(a, b)} k={k} cursor={Math.abs(a.y - b.y) < 0.5 ? 'ns-resize' : 'ew-resize'} tip={tip} data={{ handle: 'segment', seg: j + 1 }} />;
+      })}
+    </g>
+  );
 }
 
 // Arrow end under the pointer (any link)
@@ -64,11 +150,7 @@ export function FlowHandles({ node, k }: { node: FNode; k: number }) {
       {SIDES.map((side) => {
         const p = portPoint(node, side);
         return (
-          <g key={side} data-handle="flow-connect" data-id={node.id} data-side={side} data-x={p.x} data-y={p.y} style={{ cursor: 'crosshair' }}>
-            <circle cx={p.x} cy={p.y} r={10 / k} fill="transparent" />
-            <circle cx={p.x} cy={p.y} r={4.5 / k} fill="var(--accent)" stroke="white" strokeWidth={1.5 / k} />
-            <title>Drag to a side of another node to connect, or to empty space for a new node</title>
-          </g>
+          <Dot key={side} at={p} k={k} r={4.5} cursor="crosshair" tip="Drag to a side of another node to connect, or to empty space for a new node" data={{ handle: 'flow-connect', id: node.id, side, x: p.x, y: p.y }} />
         );
       })}
     </g>
@@ -76,14 +158,15 @@ export function FlowHandles({ node, k }: { node: FNode; k: number }) {
 }
 
 // Target node's sides, snapped one larger
-function SnapDots({ node, side, k }: { node: FNode; side: Side; k: number }) {
+function SnapDots({ node, side, point, k }: { node: FNode; side: Side; point: Pt; k: number }) {
   return (
     <g style={none}>
       <rect x={node.x - node.width / 2 - 4} y={node.y - node.height / 2 - 4} width={node.width + 8} height={node.height + 8} rx={4} fill="var(--accent-soft)" stroke="var(--accent)" strokeWidth={1.5 / k} />
       {SIDES.map((s) => {
         const p = portPoint(node, s);
-        return <circle key={s} cx={p.x} cy={p.y} r={(s === side ? 7 : 4) / k} fill={s === side ? 'var(--accent)' : 'white'} stroke="var(--accent)" strokeWidth={1.5 / k} />;
+        return <circle key={s} cx={p.x} cy={p.y} r={4 / k} fill="white" stroke="var(--accent)" strokeWidth={1.5 / k} />;
       })}
+      <circle cx={point.x} cy={point.y} r={7 / k} fill="var(--accent)" stroke="white" strokeWidth={1.5 / k} data-side={side} />
     </g>
   );
 }
@@ -111,6 +194,7 @@ export function FlowSelectionOverlay({ layout, selection, k }: { layout: FlowLay
       <g>
         <path d={edgePath(e)} {...style} strokeWidth={5 / k} opacity={0.35} />
         {e.labelBox && <rect x={e.labelBox.x - 2} y={e.labelBox.y - 2} width={e.labelBox.width + 4} height={e.labelBox.height + 4} rx={3} {...style} strokeWidth={1 / k} />}
+        <SegmentHandles layout={layout} index={e.index} k={k} />
         <circle data-handle="from" cx={a.x} cy={a.y} r={r} fill="white" stroke="var(--accent)" strokeWidth={sw} style={{ cursor: 'move' }}>
           <title>Drag to a side of any node to move the start</title>
         </circle>
@@ -143,6 +227,21 @@ export function FlowDragOverlay({ drag: d, layout, theme, k }: { drag: FlowDrag;
       </g>
     );
   }
+  if (d.type === 'flow-bend') {
+    const e = layout.edges.find((q) => q.index === d.index);
+    if (!e || !d.moved) return null;
+    const pts = [e.points[0], ...bendsAfter(d), e.points[e.points.length - 1]];
+    return (
+      <g style={none}>
+        <path d={e.shape === 'curved' ? smoothPath(pts) : linePath(pts)} fill="none" stroke={accent} strokeWidth={sw} strokeDasharray={dash} />
+        <circle cx={d.at.x} cy={d.at.y} r={5 / k} fill={accent} />
+      </g>
+    );
+  }
+  if (d.type === 'flow-segment') {
+    const e = layout.edges.find((q) => q.index === d.index);
+    return <g style={none}>{e && <path d={roundedPath(movedRoute(d))} fill="none" stroke={accent} strokeWidth={sw} strokeDasharray={dash} />}</g>;
+  }
   // Fixed end of the link
   let from: Pt;
   let fromSide: Side | undefined;
@@ -155,12 +254,12 @@ export function FlowDragOverlay({ drag: d, layout, theme, k }: { drag: FlowDrag;
     from = d.end === 'to' ? e.points[0] : e.points[e.points.length - 1];
     fromSide = d.end === 'to' ? e.fromSide : e.toSide;
   }
-  const snap = snapTarget(layout, d.to, k);
+  const snap = snapTarget(layout, d.to, k, { toward: from, free: d.free });
   const to = snap ? snap.point : d.to;
   const path = snap && fromSide ? roundedPath(orthoRoute(from, fromSide, snap.point, snap.side)) : `M${from.x} ${from.y} L${to.x} ${to.y}`;
   return (
     <g style={none}>
-      {snap && <SnapDots node={snap.node} side={snap.side} k={k} />}
+      {snap && <SnapDots node={snap.node} side={snap.side} point={snap.point} k={k} />}
       <path d={path} fill="none" stroke={accent} strokeWidth={sw} strokeDasharray={dash} />
       {!snap && <circle cx={to.x} cy={to.y} r={5 / k} fill={accent} />}
       {!snap && d.type === 'flow-connect' && (

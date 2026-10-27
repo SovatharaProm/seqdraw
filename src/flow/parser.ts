@@ -215,7 +215,7 @@ export function parseFlowStatement(text: string, line = 0): FlowStatement {
   return readChain(parts[0] ?? '') ?? { type: 'unknown', text: t };
 }
 
-export function parseFlowLines(code: string): FlowLine[] {
+function parseFlowLines(code: string): FlowLine[] {
   const raws = code.split(/\r?\n/);
   const first = raws.findIndex((r) => r.trim() !== '');
   const close = first >= 0 && raws[first].trim() === '---' ? raws.findIndex((r, i) => i > first && r.trim() === '---') : -1;

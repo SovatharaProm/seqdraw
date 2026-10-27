@@ -1,6 +1,7 @@
 import { DIAGRAM_KINDS } from '../core/diagram';
 import { Modal } from './components/Modal';
 import { HELP_SHORTCUTS } from './shortcuts';
+import { keys } from '../lib/platform';
 
 export function HelpDialog({ onClose }: { onClose: () => void }) {
   return (
@@ -21,8 +22,8 @@ export function HelpDialog({ onClose }: { onClose: () => void }) {
             <tbody>
               {HELP_SHORTCUTS.map(([k, v]) => (
                 <tr key={k}>
-                  <td><kbd>{k}</kbd></td>
-                  <td>{v}</td>
+                  <td><kbd>{keys(k)}</kbd></td>
+                  <td>{keys(v)}</td>
                 </tr>
               ))}
             </tbody>

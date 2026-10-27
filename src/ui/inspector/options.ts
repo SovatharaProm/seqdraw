@@ -1,5 +1,6 @@
 // Inspector option lists
 import type { BlockKind, HeadStyle, LineStyle, NotePlacement } from '../../core/model';
+import type { LineShape } from '../../flow/layout';
 import type { LinkEnd, LinkStroke, Side } from '../../flow/model';
 import type { Option } from '../components/Field';
 
@@ -10,10 +11,10 @@ export const LINE_STYLES: Option<LineStyle>[] = [
 ];
 
 export const HEAD_STYLES: Option<HeadStyle>[] = [
-  { value: 'arrow', label: 'Arrow ▶' },
-  { value: 'open', label: 'Async ⟩' },
-  { value: 'cross', label: 'Cross ✕' },
-  { value: 'both', label: 'Both ◀▶' },
+  { value: 'arrow', label: 'Arrow' },
+  { value: 'open', label: 'Async (open)' },
+  { value: 'cross', label: 'Cross' },
+  { value: 'both', label: 'Both ends' },
   { value: 'none', label: 'None' },
 ];
 
@@ -40,9 +41,9 @@ export const LINK_STROKES: Option<LinkStroke>[] = [
 ];
 
 export const LINK_HEADS: Option<LinkEnd>[] = [
-  { value: 'arrow', label: 'Arrow ▶' },
-  { value: 'circle', label: 'Circle ●' },
-  { value: 'cross', label: 'Cross ✕' },
+  { value: 'arrow', label: 'Arrow' },
+  { value: 'circle', label: 'Circle' },
+  { value: 'cross', label: 'Cross' },
   { value: 'none', label: 'None' },
 ];
 
@@ -59,4 +60,11 @@ export const SIDES: Option<Side | ''>[] = [
   { value: 'right', label: 'Right' },
   { value: 'bottom', label: 'Bottom' },
   { value: 'left', label: 'Left' },
+];
+
+export const LINE_SHAPES: Option<LineShape>[] = [
+  { value: 'auto', label: 'Auto (Mermaid)' },
+  { value: 'ortho', label: 'Orthogonal' },
+  { value: 'straight', label: 'Straight' },
+  { value: 'curved', label: 'Curved' },
 ];

@@ -1,5 +1,5 @@
 // Canvas actions
-import { dropLine, nearestParticipant } from '../core/layout';
+import { clampParticipantX, dropLine, nearestParticipant } from '../core/layout';
 import { fromMermaidText, toMermaidText } from '../core/measure';
 import type { BlockKind, LayoutOverrides, ParticipantKind, Statement } from '../core/model';
 import { isParticipantKind, shapeOf } from '../core/participants';
@@ -143,6 +143,8 @@ export function moveParticipant(id: string, x: number) {
   if (order.every((pid, i) => pid === ps[i].id)) {
     const prev = ps[cur.index - 1];
     const next = ps[cur.index + 1];
+    // Stop at neighbours
+    x = clampParticipantX(layout, id, x);
     if (prev) gap(id, Math.round(x - prev.x));
     if (next) gap(next.id, Math.round(next.x - x));
     return S().setOverrides(ov);
@@ -167,7 +169,6 @@ export function resetParticipantSize(id: string) {
   S().setOverrides(ov);
 }
 
-// Move statement
 // Snap sideways drag to lifelines
 export function horizontalShift(line: number, dx: number): { patch: Partial<Statement>; dx: number } | null {
   const { doc, layout } = S();

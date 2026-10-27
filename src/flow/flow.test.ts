@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { addEdge, addNode, deleteEdge, deleteNode, reverseEdge, setDirection, setEdge, setNodeLabel, setNodeShape, unwrapSubgraph } from './ops';
 import { parseFlow, parseFlowStatement } from './parser';
 import { formatFlowStatement, serializeFlow } from './serializer';
-import { edgeKeys, layoutFlow, nearestSide, orthoRoute, portPoint } from './layout';
+import { edgeKeys, facingSide, layoutFlow, orthoRoute, portPoint } from './layout';
 import { detectKind, isBlankDiagram, startCode } from '../core/diagram';
 import { setConfigTheme } from '../core/ops';
 import { parse } from '../core/parser';
@@ -183,7 +183,7 @@ describe('flowchart export', () => {
   it('renders a clean standalone SVG', async () => {
     const { svgString } = await import('../io/export');
     const { THEMES } = await import('../core/themes');
-    const svg = svgString(layoutFlow(parseFlow('flowchart LR\n  A[Start] -->|go| B{Ok?}\n  subgraph g [G]\n    B\n  end'), {}), THEMES.redux);
+    const svg = svgString(layoutFlow(parseFlow('flowchart LR\n  A[Start] -->|go| B{Ok?}\n  subgraph g [G]\n    B\n  end'), {}), THEMES['redux-color']);
     expect(svg).toMatch(/^<\?xml[\s\S]*<svg/);
     expect(svg).toContain('Start');
     expect(svg).not.toMatch(/data-(kind|id|line)=/);
@@ -196,10 +196,10 @@ describe('flowchart ports', () => {
     expect(edgeKeys(parseFlow('flowchart TD\n  A --> B\n  A --> B\n  B --> C'))).toEqual(['A->B#0', 'A->B#1', 'B->C#0']);
   });
 
-  it('snaps to the nearest side', () => {
+  it('picks the side facing a point', () => {
     const n = { x: 0, y: 0, width: 100, height: 40 };
-    expect(nearestSide(n, { x: 60, y: 5 })).toBe('right');
-    expect(nearestSide(n, { x: -5, y: 30 })).toBe('bottom');
+    expect(facingSide(n, { x: 60, y: 5 })).toBe('right');
+    expect(facingSide(n, { x: -5, y: 30 })).toBe('bottom');
     expect(portPoint(n, 'left')).toEqual({ x: -50, y: 0 });
   });
 
@@ -261,5 +261,119 @@ describe('blank shapes', () => {
     expect(doc.nodes.find((n) => n.id === id)!.label.trim()).toBe('');
     const n = layoutFlow(doc, {}, (t) => t.length * 7).nodes.find((q) => q.id === id)!;
     expect(n.width).toBeGreaterThan(60);
+  });
+});
+
+describe('layout config', () => {
+  it('reads, adds and removes layout: elk', async () => {
+    const { setConfigLayout } = await import('../core/ops');
+    const plain = parseFlow('flowchart TD\n    A --> B');
+    const elk = serializeFlow(setConfigLayout(plain, 'elk'));
+    expect(elk).toBe('---\nconfig:\n  layout: elk\n---\nflowchart TD\n    A --> B');
+    expect(parseFlow(elk).config.layout).toBe('elk');
+    expect(serializeFlow(setConfigLayout(parseFlow(elk), null))).toBe('flowchart TD\n    A --> B');
+    const themed = '---\nconfig:\n  theme: neo\n---\nflowchart TD\n    A --> B';
+    const both = serializeFlow(setConfigLayout(parseFlow(themed), 'elk'));
+    expect(both).toBe('---\nconfig:\n  layout: elk\n  theme: neo\n---\nflowchart TD\n    A --> B');
+    expect(serializeFlow(setConfigLayout(parseFlow(both), null))).toBe(themed);
+  });
+});
+
+describe('adaptive layout (ELK)', () => {
+  it('lays out with ELK and routes links orthogonally onto the outline', async () => {
+    const { elkLayout, engineOf } = await import('./elk');
+    const doc = parseFlow('---\nconfig:\n  layout: elk\n---\nflowchart TD\n  A[Start] --> B{Ok?}\n  B -->|yes| C[Done]\n  subgraph g [Group]\n    C\n  end');
+    expect(engineOf(doc)).toBe('elk');
+    const m = (t: string) => t.length * 7;
+    const base = layoutFlow(doc, {}, m);
+    const auto = await elkLayout(doc, base);
+    expect(Object.keys(auto.nodes).sort()).toEqual(['A', 'B', 'C']);
+    expect(auto.clusters.g.width).toBeGreaterThan(0);
+    const L = layoutFlow(doc, {}, m, {}, auto);
+    const b = L.nodes.find((n) => n.id === 'B')!;
+    const ab = L.edges[0];
+    expect(ab.ortho).toBe(true);
+    // Arrow tip sits on the diamond's top point, not its box corner
+    const tip = ab.points[ab.points.length - 1];
+    expect(Math.abs(tip.x - b.x)).toBeLessThan(1);
+    expect(Math.abs(tip.y - (b.y - b.height / 2))).toBeLessThan(1);
+    const c = L.nodes.find((n) => n.id === 'C')!;
+    const g = L.clusters[0];
+    expect(c.x > g.x && c.x < g.x + g.width && c.y > g.y && c.y < g.y + g.height).toBe(true);
+  });
+});
+
+describe('link ends anywhere on a side, hand-made routes', () => {
+  it('places points along a side and snaps to the middle', async () => {
+    const { sidePoint, sideAt } = await import('./layout');
+    const box = { x: 100, y: 100, width: 100, height: 40, shape: 'rect' as const };
+    expect(sidePoint(box, 'left', 0.25)).toEqual({ x: 50, y: 90 });
+    // Pixel precise; only within `snap` px of the middle does it snap
+    expect(sideAt(box, 'top', { x: 105, y: 80 }, 6)).toBe(0.5);
+    expect(sideAt(box, 'top', { x: 101, y: 80 })).toBe(0.51);
+    expect(sideAt(box, 'top', { x: 70, y: 80 })).toBe(0.2);
+    expect(sideAt(box, 'top', { x: 50, y: 80 })).toBe(0);
+    expect(sideAt(box, 'top', { x: 50.4, y: 80 })).toBeCloseTo(0.004, 6);
+    // Diamond: off-middle points slide onto the outline
+    const d = { x: 0, y: 0, width: 80, height: 80, shape: 'diamond' as const };
+    const p = sidePoint(d, 'top', 0.25);
+    expect(p.x).toBe(-20);
+    expect(Math.abs(Math.abs(p.x) + Math.abs(p.y) - 40)).toBeLessThan(0.5);
+  });
+  it('keeps a dragged route orthogonal when nodes move', async () => {
+    const { editableRoute, fitRoute, movedRoute } = await import('./layout');
+    const pts = editableRoute([{ x: 0, y: 0 }, { x: 200, y: 0 }], 'right', 'left');
+    expect(pts).toEqual([{ x: 0, y: 0 }, { x: 22, y: 0 }, { x: 178, y: 0 }, { x: 200, y: 0 }]);
+    // Drag the middle down 40: stubs stay, bends appear
+    const moved = movedRoute({ pts, seg: 1, axis: 'y', delta: 40 });
+    expect(moved).toEqual([{ x: 0, y: 0 }, { x: 22, y: 0 }, { x: 22, y: 40 }, { x: 178, y: 40 }, { x: 178, y: 0 }, { x: 200, y: 0 }]);
+    // Then the target moves up 30
+    const route = moved.slice(1, -1);
+    const out = fitRoute({ x: 0, y: 0 }, 'right', route, { x: 200, y: -30 }, 'left');
+    for (let i = 1; i < out.length; i++) expect(out[i].x === out[i - 1].x || out[i].y === out[i - 1].y).toBe(true);
+    expect(out[0]).toEqual({ x: 0, y: 0 });
+    expect(out[out.length - 1]).toEqual({ x: 200, y: -30 });
+  });
+  it('uses stored routes and side positions in the layout', () => {
+    const doc = parseFlow('flowchart LR\n  A --> B');
+    const base = layoutFlow(doc, {});
+    const [a, b] = base.nodes;
+    const ax = a.x + a.width / 2 + 22;
+    const bx = b.x - b.width / 2 - 22;
+    const ports = { 'A->B#0': { from: 'right' as const, to: 'left' as const, toAt: 0.25, route: [{ x: ax, y: a.y }, { x: ax, y: a.y + 60 }, { x: bx, y: a.y + 60 }, { x: bx, y: b.y }] } };
+    const L = layoutFlow(doc, { A: { x: a.x, y: a.y }, B: { x: b.x, y: b.y } }, undefined, ports);
+    const pts = L.edges[0].points;
+    expect(pts.some((p) => Math.abs(p.y - (a.y + 60)) < 0.5)).toBe(true);
+    expect(pts[pts.length - 1].y).toBeCloseTo(b.y - b.height / 2 + 0.25 * b.height, 3);
+  });
+});
+
+describe('draw.io-style links', () => {
+  it('routes right-angle links around nodes in the way', async () => {
+    const { routeAround, orthoRoute } = await import('./layout');
+    const wall = { x: 100, y: 0, width: 40, height: 120 };
+    const direct = orthoRoute({ x: 0, y: 0 }, 'right', { x: 200, y: 0 }, 'left');
+    expect(direct.length).toBe(2);
+    const pts = routeAround({ x: 0, y: 0 }, 'right', { x: 200, y: 0 }, 'left', [wall]);
+    expect(pts[0]).toEqual({ x: 0, y: 0 });
+    expect(pts[pts.length - 1]).toEqual({ x: 200, y: 0 });
+    // Right angles only, and no segment through the wall
+    for (let i = 1; i < pts.length; i++) {
+      const [p, q] = [pts[i - 1], pts[i]];
+      expect(p.x === q.x || p.y === q.y).toBe(true);
+      const crosses = Math.min(p.x, q.x) < 120 && Math.max(p.x, q.x) > 80 && Math.min(p.y, q.y) < 60 && Math.max(p.y, q.y) > -60;
+      expect(crosses).toBe(false);
+    }
+  });
+  it('draws straight links through free bends', () => {
+    const doc = parseFlow('flowchart LR\n  A --> B');
+    const base = layoutFlow(doc, {});
+    const [a, b] = base.nodes;
+    const bend = { x: (a.x + b.x) / 2, y: a.y + 80 };
+    const L = layoutFlow(doc, { A: { x: a.x, y: a.y }, B: { x: b.x, y: b.y } }, undefined, { 'A->B#0': { shape: 'straight', points: [bend] } });
+    const e = L.edges[0];
+    expect(e.shape).toBe('straight');
+    expect(e.points.length).toBe(3);
+    expect(e.points[1]).toEqual(bend);
   });
 });

@@ -9,7 +9,7 @@ import { flowShapeOf } from '../flow/shapes';
 const HEAD = 9;
 
 // d3 curveBasis
-export function basisPath(pts: Pt[]): string {
+function basisPath(pts: Pt[]): string {
   if (pts.length < 3) return pts.length ? `M${pts.map((p) => `${p.x} ${p.y}`).join(' L')}` : '';
   let d = `M${pts[0].x} ${pts[0].y}`;
   let [x0, y0, x1, y1] = [pts[0].x, pts[0].y, pts[1].x, pts[1].y];
@@ -110,8 +110,25 @@ export function roundedPath(pts: Pt[], r = 8): string {
   return `${d} L${last.x} ${last.y}`;
 }
 
+// Smooth curve through every point (Catmull-Rom)
+export function smoothPath(pts: Pt[]): string {
+  if (pts.length < 3) return `M${pts.map((p) => `${p.x} ${p.y}`).join(' L')}`;
+  let d = `M${pts[0].x} ${pts[0].y}`;
+  for (let i = 0; i < pts.length - 1; i++) {
+    const p0 = pts[i - 1] ?? pts[i];
+    const [p1, p2] = [pts[i], pts[i + 1]];
+    const p3 = pts[i + 2] ?? p2;
+    d += ` C${p1.x + (p2.x - p0.x) / 6} ${p1.y + (p2.y - p0.y) / 6} ${p2.x - (p3.x - p1.x) / 6} ${p2.y - (p3.y - p1.y) / 6} ${p2.x} ${p2.y}`;
+  }
+  return d;
+}
+
+export const linePath = (pts: Pt[]) => `M${pts.map((p) => `${p.x} ${p.y}`).join(' L')}`;
+
 export function edgePath(e: FEdge): string {
   const pts = trimmed(e.points, e.spec.start, e.spec.end);
+  if (e.shape === 'straight') return linePath(pts);
+  if (e.shape === 'curved') return smoothPath(pts);
   return e.ortho ? roundedPath(pts) : basisPath(pts);
 }
 

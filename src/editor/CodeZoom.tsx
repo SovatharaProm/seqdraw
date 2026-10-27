@@ -1,6 +1,7 @@
 import type { KeyboardEvent } from 'react';
 import { getEditorView } from './CodeEditor';
 import { CODE_SIZE, CODE_SIZE_RANGE, usePanel } from '../state/panel';
+import { keys } from '../lib/platform';
 
 function setSize(size: number) {
   usePanel.getState().setSize(size);
@@ -24,9 +25,9 @@ export function CodeZoom() {
   const size = usePanel((s) => s.size);
   return (
     <span className="code-zoom" role="group" aria-label="Code text size">
-      <button onClick={() => setSize(size - 1)} disabled={size <= CODE_SIZE_RANGE[0]} title="Smaller code text (⌘−)" aria-label="Smaller code text">−</button>
-      <button className="code-zoom-pct" onClick={() => setSize(CODE_SIZE)} title="Reset code text size (⌘0)">{Math.round((size / CODE_SIZE) * 100)}%</button>
-      <button onClick={() => setSize(size + 1)} disabled={size >= CODE_SIZE_RANGE[1]} title="Larger code text (⌘+)" aria-label="Larger code text">+</button>
+      <button onClick={() => setSize(size - 1)} disabled={size <= CODE_SIZE_RANGE[0]} title={keys('Smaller code text (⌘−)')} aria-label="Smaller code text">−</button>
+      <button className="code-zoom-pct" onClick={() => setSize(CODE_SIZE)} title={keys('Reset code text size (⌘0)')}>{Math.round((size / CODE_SIZE) * 100)}%</button>
+      <button onClick={() => setSize(size + 1)} disabled={size >= CODE_SIZE_RANGE[1]} title={keys('Larger code text (⌘+)')} aria-label="Larger code text">+</button>
     </span>
   );
 }

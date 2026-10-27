@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react';
 import { Canvas } from './canvas/Canvas';
 import { EditorPane } from './editor/EditorPane';
+import { FlowBadges } from './ui/FlowBadges';
 import { useFileDrop } from './hooks/useFileDrop';
 import { useGlobalShortcuts } from './hooks/useGlobalShortcuts';
 import { usePanel } from './state/panel';
@@ -12,7 +13,6 @@ import { Icons } from './ui/icons';
 import { Inspector } from './ui/inspector/Inspector';
 import { Palette } from './ui/Palette';
 import { Splitter } from './ui/Splitter';
-import { ThemeBadge } from './ui/ThemeBadge';
 import { Toasts } from './ui/Toasts';
 import { Toolbar } from './ui/Toolbar';
 
@@ -40,7 +40,7 @@ export default function App() {
           <Canvas />
           <Palette />
           <Inspector />
-          <ThemeBadge />
+          <FlowBadges />
           <EmptyHint />
           {!codeOpen && (
             <button className="code-open" onClick={() => setGetCode(true)} title="See the Mermaid code for this diagram">

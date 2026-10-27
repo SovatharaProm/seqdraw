@@ -24,7 +24,7 @@ function ParticipantShape({ p, y, t }: { p: LParticipant; y: number; t: Theme })
   const left = p.x - p.width / 2;
   const { fill, stroke } = participantColors(t, p.index);
   const sw = t.strokeWidth;
-  const label = t.upperLabels ? p.label.toUpperCase() : p.label;
+  const label = p.label;
   const at = (top: number) => <Text lines={[label]} x={p.x} y={top} fill={t.text} weight={t.labelWeight} />;
   if (p.kind === 'actor') {
     const cx = p.x;
@@ -258,7 +258,6 @@ export function DiagramContent({ layout, theme: t, background = true }: { layout
           y2={p.bottom}
           stroke={t.lifeline}
           strokeWidth={t.lineWidth ?? 1}
-          strokeDasharray={t.lifelineDash}
         />
       ))}
       {layout.activations.map((a, i) => {

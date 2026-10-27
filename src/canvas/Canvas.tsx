@@ -1,26 +1,39 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type PointerEvent as RPointerEvent } from 'react';
 import { nearestParticipant } from '../core/layout';
 import { contentEnd } from '../core/ops';
-import { THEMES } from '../core/themes';
 import { DiagramContent } from '../render/DiagramSvg';
 import { FlowContent } from '../render/FlowSvg';
-import { nodeAt } from '../flow/layout';
+import { editableEdge, middleSegment, movedRoute, nodeAt, sideAt } from '../flow/layout';
 import * as actions from '../state/actions';
 import * as flowActions from '../state/flowActions';
-import { alignNode, edgeEndAt, EndHover, FlowDragOverlay, FlowHandles, FlowSelectionOverlay, snapTarget, type FlowDrag } from './FlowOverlay';
+import { alignNode, edgeEndAt, EndHover, FlowDragOverlay, FlowHandles, FlowSelectionOverlay, bendsAfter, snapBend, snapTarget, type FlowDrag } from './FlowOverlay';
 import type { Side } from '../flow/model';
 import { Icons } from '../ui/icons';
-import { lineSelection, useStore } from '../state/store';
+import { FIT_EVENT } from '../lib/fit';
+import { useDiagramTheme } from '../state/appearance';
+import { usePanel } from '../state/panel';
+import { copySelection, cutSelection, duplicateSelection, pasteClipboard } from '../state/clipboard';
+import { lineSelection, useStore, type Selection } from '../state/store';
 import { inkOf, InlineEditor } from './InlineEditor';
 import { DragOverlay, SelectionOverlay } from './SequenceOverlay';
 import type { Drag, Pt, View } from './types';
+import { keys } from '../lib/platform';
 
 
 const MIN_K = 0.1;
 const MAX_K = 4;
 const DRAG_THRESHOLD = 4;
 
-export const requestFit = () => window.dispatchEvent(new Event('seqdraw:fit'));
+// ⌘/Ctrl + key
+const CLIPBOARD_KEYS: Record<string, (sel: Selection | null) => void> = {
+  c: (sel) => void copySelection(sel),
+  x: cutSelection,
+  v: () => pasteClipboard(),
+  d: duplicateSelection,
+};
+
+// Handles of the selected link
+const LINK_HANDLES = new Set(['from', 'to', 'segment', 'bend', 'bend-new']);
 
 const isTyping = () => {
   const el = document.activeElement as HTMLElement | null;
@@ -29,7 +42,8 @@ const isTyping = () => {
 
 export function Canvas() {
   const layout = useStore((s) => s.layout);
-  const theme = THEMES[useStore((s) => s.theme)] ?? THEMES.default;
+  const theme = useDiagramTheme();
+  const zoomBar = usePanel((s) => s.zoomBar);
   const selection = useStore((s) => s.selection);
   const editing = useStore((s) => s.editing);
   const doc = useStore((s) => s.doc);
@@ -94,10 +108,10 @@ export function Canvas() {
   useEffect(() => {
     const onFit = () => fit();
     const onZoom = (e: Event) => zoomAt((e as CustomEvent<number>).detail);
-    window.addEventListener('seqdraw:fit', onFit);
+    window.addEventListener(FIT_EVENT, onFit);
     window.addEventListener('seqdraw:zoom', onZoom);
     return () => {
-      window.removeEventListener('seqdraw:fit', onFit);
+      window.removeEventListener(FIT_EVENT, onFit);
       window.removeEventListener('seqdraw:zoom', onZoom);
     };
   }, [fit, zoomAt]);
@@ -132,6 +146,15 @@ export function Canvas() {
       } else if ((e.key === 'Enter' || e.key === 'F2') && sel) {
         e.preventDefault();
         setEditing(sel);
+      } else if ((e.metaKey || e.ctrlKey) && CLIPBOARD_KEYS[e.key.toLowerCase()] && (sel || e.key.toLowerCase() === 'v') && !document.querySelector('.modal-backdrop')) {
+        e.preventDefault();
+        CLIPBOARD_KEYS[e.key.toLowerCase()](sel);
+      } else if (e.key.startsWith('Arrow') && sel?.kind === 'node') {
+        // Nudge a node (Shift: 10px)
+        e.preventDefault();
+        const step = e.shiftKey ? 10 : 1;
+        const [dx, dy] = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] }[e.key] ?? [0, 0];
+        flowActions.moveNode(sel.id, dx, dy);
       } else if ((e.key === '=' || e.key === '+') && !e.metaKey && !e.ctrlKey) zoomAt(1.2);
       else if (e.key === '-' && !e.metaKey && !e.ctrlKey) zoomAt(1 / 1.2);
     };
@@ -203,9 +226,28 @@ export function Canvas() {
     const { select, flowLayout: FL } = useStore.getState();
     const handle = target.closest<SVGElement>('[data-handle]');
     const h = handle?.dataset.handle;
+    // Segment of the selected link
+    if (h === 'segment' && FL && selection?.kind === 'edge') {
+      const e = FL.edges.find((q) => q.index === selection.index);
+      const ed = e && editableEdge(FL, e);
+      if (e && ed) {
+        const seg = handle!.dataset.seg === 'auto' ? middleSegment(ed.pts) : Number(handle!.dataset.seg);
+        const axis = Math.abs(ed.pts[seg].y - ed.pts[seg + 1].y) < 0.5 ? 'y' : 'x';
+        return updateDrag({ type: 'flow-segment', index: e.index, seg, pts: ed.pts, sides: ed.sides, axis, start: p, delta: 0 });
+      }
+    }
+    // Bend: move or add
+    if ((h === 'bend' || h === 'bend-new') && FL && selection?.kind === 'edge') {
+      const e = FL.edges.find((q) => q.index === selection.index);
+      if (e) {
+        const i = Number(handle!.dataset.i);
+        const bends = e.points.slice(1, -1);
+        return updateDrag({ type: 'flow-bend', index: e.index, bends, i, insert: h === 'bend-new', at: p, moved: false });
+      }
+    }
     // Grab any arrow end (Alt on a dot: new link)
-    const found = FL && !(alt && h === 'flow-connect') && h !== 'from' && h !== 'to' ? edgeEndAt(FL, p, view.k) : null;
-    // On a dot, only arrow tips win; tails start a new link
+    const found = FL && !(alt && h === 'flow-connect') && !LINK_HANDLES.has(h ?? '') ? edgeEndAt(FL, p, view.k) : null;
+    // On a dot, tips win, tails start a link
     const grab = found && !(h === 'flow-connect' && found.end === 'from') ? found : null;
     if (grab) {
       const e = FL!.edges.find((q) => q.index === grab.index)!;
@@ -275,10 +317,22 @@ export function Canvas() {
         break;
       case 'connect':
       case 'reconnect':
-      case 'flow-connect':
-      case 'flow-reconnect':
         updateDrag({ ...d, to: p });
         break;
+      case 'flow-connect':
+      case 'flow-reconnect':
+        updateDrag({ ...d, to: p, free: e.altKey });
+        break;
+      case 'flow-segment':
+        updateDrag({ ...d, delta: Math.round(d.axis === 'x' ? p.x - d.start.x : p.y - d.start.y) });
+        break;
+      case 'flow-bend': {
+        // Snap into line
+        const link = FL?.edges.find((q) => q.index === d.index);
+        const near = link ? [link.points[0], ...d.bends.filter((_, j) => d.insert || j !== d.i), link.points[link.points.length - 1]] : [];
+        updateDrag({ ...d, at: e.altKey ? p : snapBend(near, p, view.k), moved: true });
+        break;
+      }
       case 'node': {
         // Snap to other nodes' centers
         const a = FL && !e.altKey ? alignNode(FL, d.id, p.x - d.start.x, p.y - d.start.y, view.k) : { dx: p.x - d.start.x, dy: p.y - d.start.y };
@@ -324,18 +378,35 @@ export function Canvas() {
         if (d.moved) flowActions.moveNode(d.id, d.dx, d.dy);
         break;
       case 'flow-connect': {
-        const snap = flowLayout && snapTarget(flowLayout, d.to, view.k);
+        const snap = flowLayout && snapTarget(flowLayout, d.to, view.k, { toward: d.start, free: d.free });
         const travelled = Math.hypot(d.to.x - d.start.x, d.to.y - d.start.y);
-        if (snap && (snap.node.id !== d.from || travelled > 30)) flowActions.connectNodes(d.from, snap.node.id, { from: d.fromSide, to: snap.side });
+        if (snap && (snap.node.id !== d.from || travelled > 30)) flowActions.connectNodes(d.from, snap.node.id, { from: d.fromSide, to: snap.side, toAt: snap.at });
         else if (!snap && travelled > 40) flowActions.connectToNew(d.from, d.to, d.fromSide);
         setFlowHover(null);
         break;
       }
       case 'flow-reconnect': {
-        const snap = flowLayout && snapTarget(flowLayout, d.to, view.k);
-        if (snap) flowActions.reconnectEdge(d.index, d.end, snap.node.id, snap.side);
+        // The end that stays put
+        const link = flowLayout?.edges.find((q) => q.index === d.index);
+        const toward = link && (d.end === 'to' ? link.points[0] : link.points[link.points.length - 1]);
+        const snap = flowLayout && snapTarget(flowLayout, d.to, view.k, { toward, free: d.free });
+        if (snap) flowActions.reconnectEdge(d.index, d.end, snap.node.id, snap.side, snap.at);
         // Empty canvas: leave the end there
         else if (Math.hypot(d.to.x - d.start.x, d.to.y - d.start.y) > 8 / view.k) flowActions.detachEdge(d.index, d.end, d.to);
+        break;
+      }
+      case 'flow-bend':
+        if (d.moved) flowActions.setEdgeBends(d.index, bendsAfter(d));
+        break;
+      case 'flow-segment': {
+        const FL = flowLayout;
+        const e = FL?.edges.find((q) => q.index === d.index);
+        if (!e || !d.delta) break;
+        const pts = movedRoute(d);
+        const [sa, sb] = d.sides;
+        const a = FL!.nodes.find((n) => n.id === e.from)!;
+        const b = FL!.nodes.find((n) => n.id === e.to)!;
+        flowActions.setEdgeRoute(e.index, { from: sa, to: sb, fromAt: e.fromAt ?? sideAt(a, sa, pts[0]), toAt: e.toAt ?? sideAt(b, sb, pts[pts.length - 1]), route: pts.slice(1, -1) });
         break;
       }
     }
@@ -343,7 +414,15 @@ export function Canvas() {
 
   const onDoubleClick = (e: React.MouseEvent) => {
     // Hit test
-    const el = document.elementFromPoint(e.clientX, e.clientY)?.closest<SVGElement>('[data-kind]');
+    const hit = document.elementFromPoint(e.clientX, e.clientY);
+    const bend = hit?.closest<SVGElement>('[data-handle="bend"]');
+    const sel = useStore.getState().selection;
+    if (bend && sel?.kind === 'edge') {
+      const edge = useStore.getState().flowLayout?.edges.find((q) => q.index === sel.index);
+      if (edge) flowActions.setEdgeBends(edge.index, edge.points.slice(1, -1).filter((_, j) => j !== Number(bend.dataset.i)));
+      return;
+    }
+    const el = hit?.closest<SVGElement>('[data-kind]');
     const kind = el?.dataset.kind;
     const line = Number(el?.dataset.line);
     const { setEditing } = useStore.getState();
@@ -374,8 +453,7 @@ export function Canvas() {
 
   const k = view.k;
   const accent = 'var(--accent)';
-  const grid = theme.grid ?? `color-mix(in srgb, ${theme.text} ${theme.gridStyle === 'lines' ? 14 : 22}%, ${theme.background})`;
-  const gridFine = `color-mix(in srgb, ${grid} 45%, transparent)`;
+  const grid = `color-mix(in srgb, ${theme.text} 22%, ${theme.background})`;
   const cursor = panning || drag?.type === 'pan' ? (drag ? 'grabbing' : 'grab') : drag?.type === 'participant' ? 'ew-resize' : drag?.type === 'statement' || (drag?.type === 'node' && drag.moved) ? 'grabbing' : 'default';
   const hoverNode = flowLayout && !drag && !panning ? flowLayout.nodes.find((n) => n.id === flowHover) : undefined;
   const flowCursor = endHover && !drag && !panning ? 'move' : cursor;
@@ -390,20 +468,8 @@ export function Canvas() {
         ['--accent-soft' as string]: theme.dark ? 'rgba(129, 140, 248, 0.18)' : 'rgba(79, 70, 229, 0.12)',
         // Canvas grid
         backgroundColor: theme.background,
-        ...(theme.gridStyle === 'lines'
-          ? {
-              backgroundImage: [
-                `linear-gradient(${grid} 1px, transparent 1px)`,
-                `linear-gradient(90deg, ${grid} 1px, transparent 1px)`,
-                `linear-gradient(${gridFine} 1px, transparent 1px)`,
-                `linear-gradient(90deg, ${gridFine} 1px, transparent 1px)`,
-              ].join(', '),
-              backgroundSize: `${100 * k}px ${100 * k}px, ${100 * k}px ${100 * k}px, ${20 * k}px ${20 * k}px, ${20 * k}px ${20 * k}px`,
-            }
-          : {
-              backgroundImage: `radial-gradient(circle, ${grid} ${Math.max(1, 1.2 * k)}px, transparent ${Math.max(1, 1.2 * k) + 0.5}px)`,
-              backgroundSize: `${24 * k}px ${24 * k}px`,
-            }),
+        backgroundImage: `radial-gradient(circle, ${grid} ${Math.max(1, 1.2 * k)}px, transparent ${Math.max(1, 1.2 * k) + 0.5}px)`,
+        backgroundSize: `${24 * k}px ${24 * k}px`,
         backgroundPosition: `${view.x}px ${view.y}px`,
       }}
       onDragOver={onDragOver}
@@ -442,13 +508,17 @@ export function Canvas() {
         </g>
       </svg>
       {editing && <InlineEditor target={editing} layout={layout} flow={flowLayout} view={view} fontFamily={theme.fontFamily} ink={inkOf(flowLayout, editing, theme.text)} />}
-      <div className="zoom-controls" role="toolbar" aria-label="Zoom">
+      <div className={`zoom-controls ${zoomBar}`} role="toolbar" aria-label="Zoom">
         <button className={panMode ? 'active' : ''} aria-pressed={panMode} title="Hand tool: drag anywhere to pan (or hold Space)" aria-label="Hand tool" onClick={() => setPanMode(!panMode)}><Icons.hand /></button>
         <span className="zoom-sep" />
         <button title="Zoom out (-)" aria-label="Zoom out" onClick={() => zoomAt(1 / 1.2)}><Icons.zoomOut /></button>
         <button className="zoom-pct" title="Reset to 100%" aria-label="Reset to 100%" onClick={() => zoomAt(1 / view.k)}>{Math.round(k * 100)}%</button>
         <button title="Zoom in (+)" aria-label="Zoom in" onClick={() => zoomAt(1.2)}><Icons.zoomIn /></button>
-        <button title="Fit diagram (⌘0)" aria-label="Fit diagram" onClick={fit}><Icons.fit /></button>
+        <button title={keys('Fit diagram (⌘0)')} aria-label="Fit diagram" onClick={fit}><Icons.fit /></button>
+        <span className="zoom-sep" />
+        <button title={zoomBar === 'top' ? 'Move this bar to the bottom' : 'Move this bar to the top'} aria-label={zoomBar === 'top' ? 'Move bar to bottom' : 'Move bar to top'} onClick={() => usePanel.getState().setZoomBar(zoomBar === 'top' ? 'bottom' : 'top')}>
+          {zoomBar === 'top' ? <Icons.barDown /> : <Icons.barUp />}
+        </button>
       </div>
     </div>
   );

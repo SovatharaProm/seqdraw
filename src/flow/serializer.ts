@@ -7,11 +7,11 @@ const START: Record<LinkEnd, string> = { none: '', arrow: '<', circle: 'o', cros
 const END: Record<LinkEnd, string> = { none: '', arrow: '>', circle: 'o', cross: 'x' };
 
 // Quote label when needed
-export function formatLabel(text: string): string {
+function formatLabel(text: string): string {
   return /^[\p{L}\p{N} _.,:!?'+*=#&@$%-]*$/u.test(text) && text.trim() === text && text !== '' ? text : `"${text.replace(/"/g, '#quot;')}"`;
 }
 
-export function formatNodeRef(r: NodeRef): string {
+function formatNodeRef(r: NodeRef): string {
   let out = r.id;
   if (r.meta) out += r.meta;
   else if (r.shape || r.text !== undefined) {
@@ -25,7 +25,7 @@ export function formatNodeRef(r: NodeRef): string {
 }
 
 // Link token
-export function linkToken(l: Link): string {
+function linkToken(l: Link): string {
   const n = Math.max(1, l.length);
   const head = END[l.end];
   switch (l.stroke) {
@@ -40,7 +40,7 @@ export function linkToken(l: Link): string {
   }
 }
 
-export function formatLink(l: Link): string {
+function formatLink(l: Link): string {
   const token = linkToken(l);
   if (!l.text || l.stroke === 'invisible') return ` ${token} `;
   if (l.inline && !/["|]/.test(l.text)) {

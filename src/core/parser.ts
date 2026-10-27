@@ -33,7 +33,7 @@ const RE = {
   activation: /^(activate|deactivate)\s+(.+)$/,
 };
 
-export function parseStatement(text: string): Statement {
+function parseStatement(text: string): Statement {
   const t = text.trim();
   let m: RegExpMatchArray | null;
   if (!t) return { type: 'blank' };
@@ -75,7 +75,7 @@ export function parseStatement(text: string): Statement {
   return { type: 'unknown', text: t };
 }
 
-export function parseLines(code: string): Line[] {
+function parseLines(code: string): Line[] {
   const raws = code.split(/\r?\n/);
   // Frontmatter block
   const first = raws.findIndex((r) => r.trim() !== '');
@@ -112,6 +112,9 @@ export function readConfig(lines: ConfigLine[]): { config: DiagramConfig; title?
       } else if (inConfig && key === 'theme' && unquoted) {
         config.theme = unquoted;
         config.themeLine = i;
+      } else if (inConfig && key === 'layout' && unquoted) {
+        config.layout = unquoted;
+        config.layoutLine = i;
       }
     }
   }

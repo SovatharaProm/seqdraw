@@ -38,7 +38,7 @@ export function moveRange(lines: Line[], first: number, last: number, to: number
 }
 
 // Preamble end
-export function preambleEnd(lines: Line[]): number {
+function preambleEnd(lines: Line[]): number {
   let i = lines.findIndex((l) => l.stmt.type === 'header');
   if (i < 0) return 0;
   i++;
@@ -65,7 +65,7 @@ export function findBlockEnd(lines: Line[], start: number): number {
 
 const VALID_ID = /^[^\-<>:,;+\n%]+$/;
 
-export function uniqueId(doc: Doc, base: string): string {
+function uniqueId(doc: Doc, base: string): string {
   const taken = new Set(doc.participants.map((p) => p.id));
   const clean = base.replace(/[^A-Za-z0-9_]/g, '') || 'P';
   if (!taken.has(clean)) return clean;
@@ -216,4 +216,35 @@ export function setConfigTheme<L extends AnyLine>(doc: { config: DiagramConfig; 
     return done(out);
   }
   return done([fm('---'), fm('config:'), fm(`  theme: ${theme}`), fm('---'), ...lines]);
+}
+
+// Set or clear the flowchart layout engine (`config: layout: elk`)
+export function setConfigLayout<L extends AnyLine>(doc: { config: DiagramConfig; lines: L[] }, layout: string | null): L[] {
+  const { config } = doc;
+  const lines = doc.lines as AnyLine[];
+  const done = (out: AnyLine[]) => out as L[];
+  if (config.layoutLine !== undefined) {
+    const out = lines.slice();
+    if (layout) {
+      const text = (lines[config.layoutLine].raw ?? '').replace(/(layout['"]?\s*:\s*['"]?)[\w-]+/, `$1${layout}`);
+      out[config.layoutLine] = fm(text);
+      return done(out);
+    }
+    out.splice(config.layoutLine, 1);
+    // Drop empty frontmatter
+    const [start, end] = config.frontmatter ?? [-1, -1];
+    const body = out.slice(start + 1, end - 1).map((l) => l.stmt.text ?? '');
+    if (start >= 0 && body.every((t) => !t.trim() || /^config\s*:\s*$/.test(t))) out.splice(start, end - start);
+    return done(out);
+  }
+  if (!layout) return done(lines);
+  if (config.frontmatter) {
+    const [start, end] = config.frontmatter;
+    const cfg = lines.findIndex((l, i) => i > start && i < end && /^config\s*:\s*$/.test(l.stmt.text ?? ''));
+    const out = lines.slice();
+    if (cfg >= 0) out.splice(cfg + 1, 0, fm(`  layout: ${layout}`));
+    else out.splice(end, 0, fm('config:'), fm(`  layout: ${layout}`));
+    return done(out);
+  }
+  return done([fm('---'), fm('config:'), fm(`  layout: ${layout}`), fm('---'), ...lines]);
 }

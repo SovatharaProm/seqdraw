@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { requestFit } from '../canvas/Canvas';
+import { requestFit } from '../lib/fit';
 import { useStore } from '../state/store';
 import { openDialog, save } from '../ui/fileActions';
 

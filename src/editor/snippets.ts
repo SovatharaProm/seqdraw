@@ -27,7 +27,7 @@ export interface Snippet {
 
 const msg = (arrow: string, text: string) => (a: string, b: string) => `\${1:${a}}${arrow}\${2:${b}}: \${3:${text}}`;
 
-export const SNIPPETS: Snippet[] = [
+const SNIPPETS: Snippet[] = [
   ...PARTICIPANT_SHAPES.map((d): Snippet => {
     const { keyword, meta } = declarationOf(d.kind);
     return { id: d.kind, group: 'Participants', label: d.name, keyword: d.kind, icon: d.kind, detail: d.hint, template: () => `${keyword} \${1:Id}${meta} as \${2:Label}` };
@@ -61,11 +61,11 @@ export const SNIPPETS: Snippet[] = [
   { id: 'comment', group: 'Other', label: 'Comment', keyword: 'comment', icon: 'comment', detail: 'Not drawn  %%', template: () => '%% ${1:comment}' },
 ];
 
-export const SNIPPET_GROUPS: SnippetGroup[] = ['Participants', 'Messages', 'Notes', 'Fragments', 'Other'];
+const SNIPPET_GROUPS: SnippetGroup[] = ['Participants', 'Messages', 'Notes', 'Fragments', 'Other'];
 
 const link = (arrow: string) => (a: string, b: string) => `\${1:${a}} ${arrow} \${2:${b}}`;
 
-export const FLOW_SNIPPETS: Snippet[] = [
+const FLOW_SNIPPETS: Snippet[] = [
   ...FLOW_SHAPES.map((d): Snippet => ({
     id: `node-${d.shape}`, group: 'Nodes', label: d.name, keyword: d.name.toLowerCase(), icon: 'participant', shape: d.shape, detail: d.hint,
     template: () => `\${1:id}${d.open}\${2:${d.defaultLabel}}${d.close}`,
@@ -93,7 +93,7 @@ export const FLOW_SNIPPETS: Snippet[] = [
   { id: 'flow-comment', group: 'Other', label: 'Comment', keyword: 'comment', icon: 'comment', detail: 'Not drawn  %%', template: () => '%% ${1:comment}' },
 ];
 
-export const FLOW_SNIPPET_GROUPS: SnippetGroup[] = ['Nodes', 'Links', 'Structure', 'Styling', 'Other'];
+const FLOW_SNIPPET_GROUPS: SnippetGroup[] = ['Nodes', 'Links', 'Structure', 'Styling', 'Other'];
 
 const isFlow = () => useStore.getState().kind === 'flowchart';
 
@@ -123,7 +123,7 @@ export function completeMermaid(ctx: CompletionContext): CompletionResult | null
   if (/^\s*theme\s*:\s*$/.test(line.text.slice(0, word.from - line.from))) {
     return {
       from: word.from,
-      options: Object.entries(THEMES).map(([id, t]) => ({ label: id, detail: `${t.group}${t.dark ? ' · dark' : ''}`, type: 'enum' })),
+      options: Object.entries(THEMES).map(([id, t]) => ({ label: id, detail: t.name, type: 'enum' })),
       validFor: /^[\w-]*$/,
     };
   }

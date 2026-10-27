@@ -1,5 +1,5 @@
 import type { PointerEvent as ReactPointerEvent, RefObject } from 'react';
-import { requestFit } from '../canvas/Canvas';
+import { requestFit } from '../lib/fit';
 import { SPLIT, usePanel } from '../state/panel';
 
 // Code / canvas divider

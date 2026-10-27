@@ -19,7 +19,8 @@ const External = Annotation.define<boolean>();
 
 const KEYWORDS = /^(participant|actor|as|loop|alt|else|opt|par|and|critical|option|break|rect|end|activate|deactivate|autonumber|title|off)\b/;
 
-const FLOW_KEYWORDS = /^(subgraph|end|direction|classDef|class|style|linkStyle|click|call|href|default)\b/;
+const FLOW_KEYWORDS = /^(subgraph|end|direction|click|call|href|default)\b/;
+const STYLE_KEYWORDS = /^(classDef|class|style|linkStyle)\b/;
 const FLOW_DIR = /^(TB|TD|BT|LR|RL)\b/;
 const FLOW_LINK = /^[<ox]?(-{2,}>|-{2,}[ox](?=[\s|]|$)|-{3,}|-\.+->|-\.+-[ox]?|={2,}>|={2,}[ox]|={3,}|~{3,})/;
 const FLOW_LINK_START = /^[<ox]?(--|==|-\.)(?=\s)/;
@@ -28,7 +29,7 @@ const FLOW_ID = /^[\p{L}\p{N}_]+(?:[.\-][\p{L}\p{N}_]+)*/u;
 // Closers per opener
 const CLOSERS = Object.fromEntries(SHAPE_OPENERS.map((o) => [o, FLOW_SHAPES.filter((d) => d.open === o).map((d) => d.close)]));
 
-type TokState = { afterColon: boolean; fm: 0 | 1 | 2; flow: boolean; close: string[] | null; pipe: boolean; linkText: boolean; afterId: boolean };
+type TokState = { afterColon: boolean; fm: 0 | 1 | 2; flow: boolean; close: string[] | null; pipe: boolean; linkText: boolean; afterId: boolean; style: number };
 
 // Read until one of `ends`
 function until(stream: StringStream, ends: string[]) {
@@ -40,6 +41,20 @@ function until(stream: StringStream, ends: string[]) {
   const at = Math.min(...ends.map((e) => rest.indexOf(e)).filter((i) => i >= 0));
   if (isFinite(at)) stream.pos += at;
   else stream.skipToEnd();
+}
+
+// Style line tokens
+function styleToken(stream: StringStream, state: TokState): string | null {
+  if (stream.match(/^[\w-]+(?=\s*:)/)) return 'propertyName';
+  if (stream.match(/^#[0-9a-fA-F]{3,8}\b/) || stream.match(/^-?\d+(\.\d+)?(px|%)?\b/)) return 'number';
+  if (stream.eat(':') || stream.eat(',') || stream.eat(';')) return 'punctuation';
+  if (stream.match(/^[^\s:,;]+/)) {
+    // Target name
+    if (state.style === 1 || /^class\b/.test(stream.string.trim())) return (state.style = 2), 'variableName';
+    return 'atom';
+  }
+  stream.next();
+  return null;
 }
 
 // Flowchart tokens
@@ -86,6 +101,12 @@ function flowToken(stream: StringStream, state: TokState): string | null {
     stream.skipToEnd();
     return 'comment';
   }
+  // Style lines
+  if (state.style) return styleToken(stream, state);
+  if (stream.match(STYLE_KEYWORDS)) {
+    state.style = 1;
+    return 'keyword';
+  }
   if (stream.match(/^(flowchart|graph)\b/)) return 'heading';
   if (stream.match(FLOW_DIR)) return 'keyword';
   if (stream.match(FLOW_KEYWORDS)) return 'keyword';
@@ -111,7 +132,7 @@ function flowToken(stream: StringStream, state: TokState): string | null {
 
 // Mermaid tokenizer
 const mermaidSequence = StreamLanguage.define<TokState>({
-  startState: () => ({ afterColon: false, fm: 0, flow: false, close: null, pipe: false, linkText: false, afterId: false }),
+  startState: () => ({ afterColon: false, fm: 0, flow: false, close: null, pipe: false, linkText: false, afterId: false, style: 0 }),
   token(stream, state) {
     if (stream.sol()) {
       state.afterColon = false;
@@ -119,6 +140,7 @@ const mermaidSequence = StreamLanguage.define<TokState>({
       state.pipe = false;
       state.linkText = false;
       state.afterId = false;
+      state.style = 0;
       if (state.fm !== 2 && stream.match(/^---\s*$/)) {
         state.fm = state.fm === 0 ? 1 : 2;
         return 'meta';
@@ -161,16 +183,18 @@ const mermaidSequence = StreamLanguage.define<TokState>({
   },
 });
 
+// Cotton candy palette (see --code-* tokens)
 const highlight = HighlightStyle.define([
-  { tag: tags.heading, color: 'var(--code-header)', fontWeight: '600' },
-  { tag: tags.keyword, color: 'var(--code-keyword)', fontWeight: '500' },
-  { tag: tags.operator, color: 'var(--code-operator)' },
-  { tag: tags.string, color: 'var(--code-string)' },
-  { tag: tags.comment, color: 'var(--code-comment)', fontStyle: 'italic' },
+  { tag: tags.heading, color: 'var(--code-type)', fontWeight: '700' },
+  { tag: tags.keyword, color: 'var(--code-keyword)' },
   { tag: tags.variableName, color: 'var(--code-name)' },
-  { tag: tags.meta, color: 'var(--code-meta)' },
-  { tag: tags.propertyName, color: 'var(--code-property)' },
-  { tag: tags.punctuation, color: 'var(--muted)' },
+  { tag: tags.operator, color: 'var(--code-arrow)', fontWeight: '700' },
+  { tag: tags.string, color: 'var(--code-string)' },
+  { tag: tags.propertyName, color: 'var(--code-name)' },
+  { tag: [tags.number, tags.atom], color: 'var(--code-keyword)' },
+  { tag: tags.meta, color: 'var(--code-keyword)' },
+  { tag: tags.punctuation, color: 'var(--code-bracket)', fontWeight: '700' },
+  { tag: tags.comment, color: 'var(--code-comment)', fontStyle: 'italic' },
 ]);
 
 // Indent guides
@@ -226,8 +250,8 @@ const editorTheme = EditorView.theme({
   // No ligatures
   '.cm-scroller': { fontFamily: 'var(--font-mono)', lineHeight: '1.65', fontVariantLigatures: 'none' },
   '.cm-gutters': { backgroundColor: 'var(--panel)', color: 'var(--muted)', border: 'none' },
-  '.cm-activeLine': { backgroundColor: 'var(--hover)' },
-  '.cm-activeLineGutter': { backgroundColor: 'var(--hover)' },
+  '.cm-activeLine': { backgroundColor: 'var(--code-active)' },
+  '.cm-activeLineGutter': { backgroundColor: 'var(--code-active)' },
   '.cm-linked': { backgroundColor: 'var(--accent-soft)' },
   '.cm-indent': { backgroundImage: 'linear-gradient(to right, var(--border) 1px, transparent 1px)', backgroundSize: '4ch 100%', backgroundPosition: '0.4ch 0' },
   '&.cm-focused': { outline: 'none' },
@@ -240,7 +264,7 @@ const editorTheme = EditorView.theme({
   '.cm-completionSection': { fontSize: '10.5px', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted)', padding: '6px 10px 2px !important', borderBottom: 'none !important' },
   '.cm-completionMatchedText': { textDecoration: 'none', color: 'var(--accent)', fontWeight: '600' },
   '.cm-snippetField': { backgroundColor: 'var(--accent-soft)', borderRadius: '2px' },
-  '&.cm-focused .cm-selectionBackground, .cm-selectionBackground': { backgroundColor: 'var(--accent-soft) !important' },
+  '&.cm-focused .cm-selectionBackground, .cm-selectionBackground': { backgroundColor: 'var(--code-selection) !important' },
 });
 
 export function CodeEditor() {

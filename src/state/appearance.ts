@@ -1,26 +1,25 @@
-// App appearance
+// App appearance (also picks the diagram theme)
 import { create } from 'zustand';
+import { themeFor, themeIdFor, type Theme, type ThemeId } from '../core/themes';
 import { readString, writeString } from '../lib/storage';
 
-export type Appearance = 'system' | 'light' | 'dark';
+export type Appearance = 'light' | 'dark';
 
-function read(): Appearance {
-  const v = readString('appearance');
-  return v === 'light' || v === 'dark' ? v : 'system';
-}
+const DEFAULT_APPEARANCE: Appearance = 'light';
 
-function apply(a: Appearance) {
-  const root = document.documentElement;
-  if (a === 'system') root.removeAttribute('data-theme');
-  else root.setAttribute('data-theme', a);
-}
+const read = (): Appearance => (readString('appearance') === 'dark' ? 'dark' : DEFAULT_APPEARANCE);
 
-export const useAppearance = create<{ appearance: Appearance; setAppearance(a: Appearance): void }>((set) => ({
+const apply = (a: Appearance) => document.documentElement.setAttribute('data-theme', a);
+
+export const useAppearance = create<{ appearance: Appearance; setAppearance(a: Appearance): void; toggle(): void }>((set, get) => ({
   appearance: read(),
   setAppearance(appearance) {
     apply(appearance);
     writeString('appearance', appearance);
     set({ appearance });
+  },
+  toggle() {
+    get().setAppearance(get().appearance === 'dark' ? 'light' : 'dark');
   },
 }));
 
@@ -28,3 +27,8 @@ export const useAppearance = create<{ appearance: Appearance; setAppearance(a: A
 export function initAppearance() {
   apply(useAppearance.getState().appearance);
 }
+
+// Diagram theme for the current appearance
+export const useDiagramTheme = (): Theme => useAppearance((s) => themeFor(s.appearance === 'dark'));
+export const diagramTheme = (): Theme => themeFor(useAppearance.getState().appearance === 'dark');
+export const diagramThemeId = (): ThemeId => themeIdFor(useAppearance.getState().appearance === 'dark');

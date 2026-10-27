@@ -81,6 +81,9 @@ export interface DiagramConfig {
   theme?: string;
   // Theme line
   themeLine?: number;
+  // `layout: elk`
+  layout?: string;
+  layoutLine?: number;
   // Frontmatter range
   frontmatter?: [number, number];
 }
@@ -93,13 +96,15 @@ export interface Doc {
   errors: ParseError[];
 }
 
+type NodeSide = 'top' | 'right' | 'bottom' | 'left';
+
 // Layout overrides (saved in .seqd, not in code)
 export interface LayoutOverrides {
   participants: Record<string, { width?: number; height?: number; gap?: number }>;
   // Flowchart node positions (centers)
   nodes?: Record<string, { x: number; y: number }>;
-  // Flowchart link sides, by edge key
-  ports?: Record<string, { from?: 'top' | 'right' | 'bottom' | 'left'; to?: 'top' | 'right' | 'bottom' | 'left' }>;
+  // Flowchart links by edge key
+  ports?: Record<string, { from?: NodeSide; to?: NodeSide; fromAt?: number; toAt?: number; route?: { x: number; y: number }[]; shape?: 'ortho' | 'straight' | 'curved'; points?: { x: number; y: number }[] }>;
 }
 
 export const emptyOverrides = (): LayoutOverrides => ({ participants: {}, nodes: {}, ports: {} });

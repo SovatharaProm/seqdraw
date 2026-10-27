@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useRef, type ReactNode } from 'react';
+import { useExitAnimation } from '../../hooks/useExitAnimation';
 import { Icons } from '../icons';
 import { IconButton } from './Button';
 
@@ -6,13 +7,9 @@ const OUT_MS = 140;
 
 // Dialog with fade, X and Escape
 export function Modal({ label, className = '', onClose, children }: { label: string; className?: string; onClose: () => void; children: ReactNode | ((close: () => void) => ReactNode) }) {
-  const [closing, setClosing] = useState(false);
+  const { leaving: closing, leave } = useExitAnimation(OUT_MS);
   const box = useRef<HTMLDivElement>(null);
-  const close = () => {
-    if (closing) return;
-    setClosing(true);
-    setTimeout(onClose, OUT_MS);
-  };
+  const close = () => leave(onClose);
   const closeRef = useRef(close);
   closeRef.current = close;
 

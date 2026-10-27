@@ -9,13 +9,15 @@
       // Boot: appearance and panel layout before first paint (keys match src/lib/storage.ts)
       (function () {
         try {
-          var a = localStorage.getItem('seqdraw.appearance');
-          if (a === 'light' || a === 'dark') document.documentElement.setAttribute('data-theme', a);
+          // Light unless dark was chosen
+          document.documentElement.setAttribute('data-theme', localStorage.getItem('seqdraw.appearance') === 'dark' ? 'dark' : 'light');
           var root = document.documentElement.style;
           var split = Number(localStorage.getItem('seqdraw.code.split'));
           if (split > 0) root.setProperty('--boot-split', split + '%');
           if (localStorage.getItem('seqdraw.code.open') === '0') document.documentElement.setAttribute('data-boot-code', 'closed');
-        } catch (e) {}
+        } catch (e) {
+          document.documentElement.setAttribute('data-theme', 'light');
+        }
       })();
     </script>
     <style>
@@ -24,9 +26,6 @@
         --b-bg: #f6f7fb; --b-panel: #ffffff; --b-border: #e3e5ef; --b-block: #eceef5; --b-shine: rgba(255, 255, 255, 0.7); --b-accent: #4f46e5;
         position: fixed; inset: 0; z-index: 100; display: flex; flex-direction: column; background: var(--b-bg);
         transition: opacity 220ms ease-out;
-      }
-      @media (prefers-color-scheme: dark) {
-        :root:not([data-theme='light']) #boot { --b-bg: #0d0e15; --b-panel: #151722; --b-border: #262938; --b-block: #20232f; --b-shine: rgba(255, 255, 255, 0.05); --b-accent: #818cf8; }
       }
       :root[data-theme='dark'] #boot { --b-bg: #0d0e15; --b-panel: #151722; --b-border: #262938; --b-block: #20232f; --b-shine: rgba(255, 255, 255, 0.05); --b-accent: #818cf8; }
       #boot.done { opacity: 0; pointer-events: none; }
