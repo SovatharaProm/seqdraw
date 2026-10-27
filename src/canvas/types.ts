@@ -10,7 +10,9 @@ export type SequenceDrag =
   | { type: 'statement'; line: number; start: Pt; x: number; y: number; moved: boolean }
   | { type: 'resize'; id: string; start: Pt; w: number; h: number; dw: number; dh: number }
   | { type: 'connect'; from: string; start: Pt; to: Pt }
-  | { type: 'reconnect'; line: number; end: 'from' | 'to'; start: Pt; to: Pt };
+  | { type: 'reconnect'; line: number; end: 'from' | 'to'; start: Pt; to: Pt }
+  // Box selection (Shift: add)
+  | { type: 'marquee'; start: Pt; to: Pt; add: boolean };
 
 export type Drag = SequenceDrag | FlowDrag;
 

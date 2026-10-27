@@ -1,6 +1,9 @@
 // Help: gestures and shortcuts
 export const HELP_SHORTCUTS: [keys: string, action: string][] = [
-  ['Drag empty canvas / Space+drag', 'Pan'],
+  ['Drag empty canvas', 'Select everything inside the box (Shift: add to the selection)'],
+  ['Shift+click', 'Add or remove one item'],
+  ['⌘A', 'Select all'],
+  ['Space+drag, middle button, H (hand tool)', 'Pan (V: back to selecting)'],
   ['Scroll', 'Pan'],
   ['⌘/Ctrl + scroll, pinch, + / −', 'Zoom'],
   ['⌘0', 'Fit diagram to screen'],
@@ -21,9 +24,9 @@ export const HELP_SHORTCUTS: [keys: string, action: string][] = [
   ['Double-click, Enter or F2', 'Edit text'],
   ['Shift+Enter while editing', 'New line'],
   ['Delete / Backspace', 'Delete selection'],
-  ['⌘C / ⌘X / ⌘V', 'Copy, cut, paste the selection'],
+  ['⌘C / ⌘X / ⌘V', 'Copy, cut, paste the selection (one item or many)'],
   ['⌘D', 'Duplicate the selection'],
-  ['Arrow keys (Shift: ×10)', 'Nudge the selected flowchart node'],
+  ['Arrow keys (Shift: ×10)', 'Nudge the selected flowchart nodes'],
   ['⌘Z / ⇧⌘Z', 'Undo / redo'],
   ['⌘S / ⌘O', 'Save / open'],
   ['⌘↵ in the code editor', 'Update the diagram (when Auto-Update is off)'],

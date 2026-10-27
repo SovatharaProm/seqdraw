@@ -12,7 +12,9 @@ import { Icons } from '../ui/icons';
 import { FIT_EVENT } from '../lib/fit';
 import { useDiagramTheme } from '../state/appearance';
 import { usePanel } from '../state/panel';
-import { copySelection, cutSelection, duplicateSelection, pasteClipboard } from '../state/clipboard';
+import { copySelection, cutSelection, deleteItems, duplicateSelection, pasteClipboard, selectedItems } from '../state/clipboard';
+import { GroupOutline, MarqueeBox } from './GroupOverlay';
+import { allItems, itemsInRect, rectOf } from './marquee';
 import { lineSelection, useStore, type Selection } from '../state/store';
 import { inkOf, InlineEditor } from './InlineEditor';
 import { DragOverlay, SelectionOverlay } from './SequenceOverlay';
@@ -25,12 +27,20 @@ const MAX_K = 4;
 const DRAG_THRESHOLD = 4;
 
 // ⌘/Ctrl + key
-const CLIPBOARD_KEYS: Record<string, (sel: Selection | null) => void> = {
-  c: (sel) => void copySelection(sel),
+const SELECTION_KEYS: Record<string, () => void> = {
+  a: () => useStore.getState().selectMany(allItems()),
+  c: () => void copySelection(),
   x: cutSelection,
-  v: () => pasteClipboard(),
+  v: pasteClipboard,
   d: duplicateSelection,
 };
+
+// Toggle an item in the selection (Shift+click)
+function toggleSelected(item: Selection) {
+  const items = selectedItems();
+  const same = (q: Selection) => JSON.stringify(q) === JSON.stringify(item);
+  useStore.getState().selectMany(items.some(same) ? items.filter((q) => !same(q)) : [...items, item]);
+}
 
 // Handles of the selected link
 const LINK_HANDLES = new Set(['from', 'to', 'segment', 'bend', 'bend-new']);
@@ -44,6 +54,7 @@ export function Canvas() {
   const layout = useStore((s) => s.layout);
   const theme = useDiagramTheme();
   const zoomBar = usePanel((s) => s.zoomBar);
+  const multi = useStore((s) => s.multi);
   const selection = useStore((s) => s.selection);
   const editing = useStore((s) => s.editing);
   const doc = useStore((s) => s.doc);
@@ -133,30 +144,33 @@ export function Canvas() {
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
       if (isTyping()) return;
-      const { selection: sel, setEditing, select } = useStore.getState();
+      const { selection: sel, multi, setEditing, select } = useStore.getState();
       if (e.key === ' ') {
         setSpaceDown(true);
         e.preventDefault();
-      } else if ((e.key === 'Delete' || e.key === 'Backspace') && sel) {
+      } else if ((e.key === 'Delete' || e.key === 'Backspace') && (sel || multi.length)) {
         e.preventDefault();
-        actions.deleteSelection(sel);
+        deleteItems(selectedItems());
       } else if (e.key === 'Escape') {
         if (dragRef.current) updateDrag(null);
         else select(null);
       } else if ((e.key === 'Enter' || e.key === 'F2') && sel) {
         e.preventDefault();
         setEditing(sel);
-      } else if ((e.metaKey || e.ctrlKey) && CLIPBOARD_KEYS[e.key.toLowerCase()] && (sel || e.key.toLowerCase() === 'v') && !document.querySelector('.modal-backdrop')) {
+      } else if ((e.metaKey || e.ctrlKey) && SELECTION_KEYS[e.key.toLowerCase()] && (sel || multi.length || 'av'.includes(e.key.toLowerCase())) && !document.querySelector('.modal-backdrop')) {
         e.preventDefault();
-        CLIPBOARD_KEYS[e.key.toLowerCase()](sel);
-      } else if (e.key.startsWith('Arrow') && sel?.kind === 'node') {
-        // Nudge a node (Shift: 10px)
+        SELECTION_KEYS[e.key.toLowerCase()]();
+      } else if (e.key.startsWith('Arrow') && selectedItems().some((q) => q.kind === 'node')) {
+        // Nudge nodes (Shift: 10px)
         e.preventDefault();
         const step = e.shiftKey ? 10 : 1;
         const [dx, dy] = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] }[e.key] ?? [0, 0];
-        flowActions.moveNode(sel.id, dx, dy);
+        flowActions.moveNodes(selectedItems().flatMap((q) => (q.kind === 'node' ? [q.id] : [])), dx, dy);
       } else if ((e.key === '=' || e.key === '+') && !e.metaKey && !e.ctrlKey) zoomAt(1.2);
       else if (e.key === '-' && !e.metaKey && !e.ctrlKey) zoomAt(1 / 1.2);
+      // H: hand tool, V: select
+      else if (e.key.toLowerCase() === 'h' && !e.metaKey && !e.ctrlKey) setPanMode((on) => !on);
+      else if (e.key.toLowerCase() === 'v' && !e.metaKey && !e.ctrlKey) setPanMode(false);
     };
     const up = (e: KeyboardEvent) => e.key === ' ' && setSpaceDown(false);
     window.addEventListener('keydown', down);
@@ -182,7 +196,7 @@ export function Canvas() {
     }
     if (e.button !== 0) return;
 
-    if (useStore.getState().flowLayout) return flowPointerDown(target, p, { x: e.clientX, y: e.clientY }, e.altKey);
+    if (useStore.getState().flowLayout) return flowPointerDown(target, p, e.altKey, e.shiftKey);
 
     const handle = target.closest<SVGElement>('[data-handle]');
     if (handle) {
@@ -200,6 +214,9 @@ export function Canvas() {
     const el = target.closest<SVGElement>('[data-kind]');
     const kind = el?.dataset.kind;
     const line = Number(el?.dataset.line);
+    if (e.shiftKey && (kind === 'participant' || kind === 'message' || kind === 'note' || kind === 'frame' || kind === 'frame-label')) {
+      return toggleSelected(kind === 'participant' ? { kind, id: el!.dataset.id! } : { kind: kind === 'frame-label' ? 'frame' : kind, line });
+    }
     if (kind === 'participant') {
       const id = el!.dataset.id!;
       select({ kind: 'participant', id });
@@ -218,11 +235,11 @@ export function Canvas() {
       select(lineSelection(useStore.getState(), line));
       return;
     }
-    updateDrag({ type: 'pan', start: { x: e.clientX, y: e.clientY }, view, moved: false, clear: true });
+    updateDrag({ type: 'marquee', start: p, to: p, add: e.shiftKey });
   };
 
   // Flowchart pointer down
-  const flowPointerDown = (target: Element, p: Pt, client: Pt, alt: boolean) => {
+  const flowPointerDown = (target: Element, p: Pt, alt: boolean, shift: boolean) => {
     const { select, flowLayout: FL } = useStore.getState();
     const handle = target.closest<SVGElement>('[data-handle]');
     const h = handle?.dataset.handle;
@@ -264,12 +281,18 @@ export function Canvas() {
     const kind = el?.dataset.kind;
     if (kind === 'node') {
       const id = el!.dataset.id!;
-      select({ kind: 'node', id });
-      return updateDrag({ type: 'node', id, start: p, dx: 0, dy: 0, moved: false });
+      if (shift) return toggleSelected({ kind: 'node', id });
+      // Part of a group: move them all
+      const group = useStore.getState().multi.flatMap((q) => (q.kind === 'node' ? [q.id] : []));
+      if (!group.includes(id)) select({ kind: 'node', id });
+      return updateDrag({ type: 'node', id, ids: group.includes(id) ? group : [id], start: p, dx: 0, dy: 0, moved: false });
     }
-    if (kind === 'edge') return select({ kind: 'edge', index: Number(el!.dataset.id), line: Number(el!.dataset.line) });
+    if (kind === 'edge') {
+      const item = { kind: 'edge' as const, index: Number(el!.dataset.id), line: Number(el!.dataset.line) };
+      return shift ? toggleSelected(item) : select(item);
+    }
     if (kind === 'subgraph') return select({ kind: 'subgraph', id: el!.dataset.id! });
-    updateDrag({ type: 'pan', start: client, view, moved: false, clear: true });
+    updateDrag({ type: 'marquee', start: p, to: p, add: shift });
   };
 
   const onPointerMove = (e: RPointerEvent<SVGSVGElement>) => {
@@ -306,6 +329,9 @@ export function Canvas() {
         if (!d.moved && Math.hypot(dx, dy) > DRAG_THRESHOLD) updateDrag({ ...d, moved: true });
         break;
       }
+      case 'marquee':
+        updateDrag({ ...d, to: p });
+        break;
       case 'participant':
         updateDrag({ ...d, dx: p.x - d.start.x, moved: d.moved || moved(d.start) });
         break;
@@ -375,8 +401,20 @@ export function Canvas() {
         break;
       }
       case 'node':
-        if (d.moved) flowActions.moveNode(d.id, d.dx, d.dy);
+        if (d.moved) flowActions.moveNodes(d.ids, d.dx, d.dy);
         break;
+      case 'marquee': {
+        const r = rectOf(d.start, d.to);
+        // A click on empty canvas clears the selection
+        if ((r.x2 - r.x1) * view.k < DRAG_THRESHOLD && (r.y2 - r.y1) * view.k < DRAG_THRESHOLD) {
+          if (!d.add) useStore.getState().select(null);
+          break;
+        }
+        const found = itemsInRect(r);
+        const keep = d.add ? selectedItems().filter((q) => !found.some((f) => JSON.stringify(f) === JSON.stringify(q))) : [];
+        useStore.getState().selectMany([...keep, ...found]);
+        break;
+      }
       case 'flow-connect': {
         const snap = flowLayout && snapTarget(flowLayout, d.to, view.k, { toward: d.start, free: d.free });
         const travelled = Math.hypot(d.to.x - d.start.x, d.to.y - d.start.y);
@@ -488,7 +526,7 @@ export function Canvas() {
       >
         <g transform={`translate(${view.x} ${view.y}) scale(${k})`}>
           {drag?.type === 'statement' && drag.moved && <style>{`.diagram-main [data-line="${drag.line}"] { opacity: 0.25; }`}</style>}
-          {drag?.type === 'node' && drag.moved && <style>{`.diagram-main [data-kind="node"][data-id="${CSS.escape(drag.id)}"] { opacity: 0.25; }`}</style>}
+          {drag?.type === 'node' && drag.moved && <style>{drag.ids.map((id) => `.diagram-main [data-kind="node"][data-id="${CSS.escape(id)}"]`).join(', ') + ' { opacity: 0.25; }'}</style>}
           <g className="diagram-main">
             {flowLayout ? <FlowContent layout={flowLayout} theme={theme} background={false} /> : <DiagramContent layout={layout} theme={theme} background={false} />}
           </g>
@@ -503,13 +541,15 @@ export function Canvas() {
               <title>Drag to another lifeline to add a message</title>
             </g>
           )}
-          {drag && flowLayout && <FlowDragOverlay drag={drag as FlowDrag} layout={flowLayout} theme={theme} k={k} />}
-          {drag && !flowLayout && <DragOverlay drag={drag} layout={layout} theme={theme} k={k} end={contentEnd(doc.lines)} />}
+          {multi.length > 0 && <GroupOutline items={multi} layout={layout} flow={flowLayout} k={k} />}
+          {drag?.type === 'marquee' && <MarqueeBox start={drag.start} to={drag.to} k={k} />}
+          {drag && drag.type !== 'marquee' && flowLayout && <FlowDragOverlay drag={drag as FlowDrag} layout={flowLayout} theme={theme} k={k} />}
+          {drag && drag.type !== 'marquee' && !flowLayout && <DragOverlay drag={drag} layout={layout} theme={theme} k={k} end={contentEnd(doc.lines)} />}
         </g>
       </svg>
       {editing && <InlineEditor target={editing} layout={layout} flow={flowLayout} view={view} fontFamily={theme.fontFamily} ink={inkOf(flowLayout, editing, theme.text)} />}
       <div className={`zoom-controls ${zoomBar}`} role="toolbar" aria-label="Zoom">
-        <button className={panMode ? 'active' : ''} aria-pressed={panMode} title="Hand tool: drag anywhere to pan (or hold Space)" aria-label="Hand tool" onClick={() => setPanMode(!panMode)}><Icons.hand /></button>
+        <button className={panMode ? 'active' : ''} aria-pressed={panMode} title="Hand tool (H): drag to pan. Or hold Space, use the middle button, or scroll" aria-label="Hand tool" onClick={() => setPanMode(!panMode)}><Icons.hand /></button>
         <span className="zoom-sep" />
         <button title="Zoom out (-)" aria-label="Zoom out" onClick={() => zoomAt(1 / 1.2)}><Icons.zoomOut /></button>
         <button className="zoom-pct" title="Reset to 100%" aria-label="Reset to 100%" onClick={() => zoomAt(1 / view.k)}>{Math.round(k * 100)}%</button>

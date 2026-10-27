@@ -291,6 +291,43 @@ function inShape(n: { x: number; y: number; width: number; height: number; shape
   return inside;
 }
 
+// Diamonds, circles…: move an end to its side's middle (with its bend, so it stays orthogonal)
+function centerEnd(pts: Pt[], i: number, n: FNode) {
+  const def = flowShapeOf(n.shape);
+  if (!def.round && !def.polygon) return;
+  const side = facingSide(n, pts[i]);
+  const axis = side === 'top' || side === 'bottom' ? 'x' : 'y';
+  const shift = portPoint(n, side)[axis] - pts[i][axis];
+  if (Math.abs(shift) < 0.5) return;
+  if (pts.length === 2) {
+    // Straight link: jog halfway so the other end stays put
+    const [a, b] = pts;
+    const other = axis === 'x' ? 'y' : 'x';
+    const m = (a[other] + b[other]) / 2;
+    const j1 = { ...a, [other]: m } as Pt;
+    const j2 = { ...b, [other]: m } as Pt;
+    pts.splice(1, 0, j1, j2);
+    i = i === 0 ? 0 : 3;
+  }
+  pts[i][axis] += shift;
+  pts[i === 0 ? 1 : i - 1][axis] += shift;
+}
+
+// Closest point on a polyline
+function onLine(pts: Pt[], p: Pt): Pt {
+  let best = pts[0];
+  let dist = Infinity;
+  for (let i = 1; i < pts.length; i++) {
+    const [a, b] = [pts[i - 1], pts[i]];
+    const len = (b.x - a.x) ** 2 + (b.y - a.y) ** 2 || 1;
+    const t = Math.max(0, Math.min(1, ((p.x - a.x) * (b.x - a.x) + (p.y - a.y) * (b.y - a.y)) / len));
+    const q = { x: a.x + t * (b.x - a.x), y: a.y + t * (b.y - a.y) };
+    const d = Math.hypot(q.x - p.x, q.y - p.y);
+    if (d < dist) [best, dist] = [q, d];
+  }
+  return best;
+}
+
 // Slide a box point onto the outline
 function clipAlong(n: { x: number; y: number; width: number; height: number; shape: FlowShape }, end: Pt, prev: Pt): Pt {
   const len = Math.hypot(end.x - prev.x, end.y - prev.y);
@@ -536,7 +573,12 @@ export function layoutFlow(doc: FlowDoc, positions: NodePositions, measure: Meas
     } else if (a && b && same && de?.elk && pts.length >= 2) {
       // ELK route, ends on the outline
       e.ortho = true;
+      pts = pts.map((q) => ({ ...q }));
+      centerEnd(pts, 0, a);
+      centerEnd(pts, pts.length - 1, b);
       pts = [clipAlong(a, pts[0], pts[1]), ...pts.slice(1, -1), clipAlong(b, pts[pts.length - 1], pts[pts.length - 2])];
+      // Label on the line
+      if (lx !== undefined && ly !== undefined) ({ x: lx, y: ly } = onLine(pts, { x: lx, y: ly }));
     } else if (a && b && pts.length >= 2) {
       const inner = pts.slice(1, -1);
       const start = clip(a, inner[0] ?? b);

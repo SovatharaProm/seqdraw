@@ -6,7 +6,8 @@ import { edgePath, FlowNodeShape, linePath, roundedPath, smoothPath } from '../r
 import type { Selection } from '../state/store';
 
 export type FlowDrag =
-  | { type: 'node'; id: string; start: Pt; dx: number; dy: number; moved: boolean; guideX?: number; guideY?: number }
+  // `ids`: every node moving with it
+  | { type: 'node'; id: string; ids: string[]; start: Pt; dx: number; dy: number; moved: boolean; guideX?: number; guideY?: number }
   | { type: 'flow-connect'; from: string; fromSide: Side; start: Pt; to: Pt; free?: boolean }
   | { type: 'flow-reconnect'; index: number; end: 'from' | 'to'; start: Pt; to: Pt; free?: boolean }
   // Drag one segment of a link's route
@@ -221,8 +222,12 @@ export function FlowDragOverlay({ drag: d, layout, theme, k }: { drag: FlowDrag;
         {d.guideX !== undefined && <line x1={d.guideX} x2={d.guideX} y1={b.y} y2={b.y + b.height} stroke={accent} strokeWidth={1 / k} strokeDasharray={`${4 / k} ${3 / k}`} />}
         {d.guideY !== undefined && <line x1={b.x} x2={b.x + b.width} y1={d.guideY} y2={d.guideY} stroke={accent} strokeWidth={1 / k} strokeDasharray={`${4 / k} ${3 / k}`} />}
         <g opacity={0.8} transform={`translate(${d.dx} ${d.dy})`}>
-          <FlowNodeShape node={n} theme={theme} />
-          <rect x={n.x - n.width / 2 - 4} y={n.y - n.height / 2 - 4} width={n.width + 8} height={n.height + 8} rx={4} fill="none" stroke={accent} strokeWidth={sw} strokeDasharray={dash} />
+          {layout.nodes.filter((q) => d.ids.includes(q.id)).map((q) => (
+            <g key={q.id}>
+              <FlowNodeShape node={q} theme={theme} />
+              <rect x={q.x - q.width / 2 - 4} y={q.y - q.height / 2 - 4} width={q.width + 8} height={q.height + 8} rx={4} fill="none" stroke={accent} strokeWidth={sw} strokeDasharray={dash} />
+            </g>
+          ))}
         </g>
       </g>
     );

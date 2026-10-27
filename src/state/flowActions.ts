@@ -38,7 +38,7 @@ function pruneFree(lines: FlowLine[]): FlowLine[] {
 }
 
 // Commit, keeping nodes in place
-const commit = (raw: FlowLine[], opts: { select?: Selection | null; edit?: FlowSelection; overrides?: LayoutOverrides } = {}) => {
+const commit = (raw: FlowLine[], opts: { select?: Selection | null; multi?: Selection[]; edit?: FlowSelection; overrides?: LayoutOverrides } = {}) => {
   const lines = pruneFree(raw);
   if (lines !== raw && opts.select?.kind === 'edge') {
     // Re-find the edge after pruning
@@ -137,6 +137,68 @@ export function flowDelete(sel: FlowSelection) {
   commit(unwrapSubgraph(f, sel.id), { select: null });
 }
 
+// Delete several nodes and links in one step
+export function flowDeleteMany(nodeIds: string[], edgeIndexes: number[]) {
+  let lines = F().lines;
+  // Highest index first keeps the others valid
+  for (const i of [...edgeIndexes].sort((a, b) => b - a)) lines = deleteEdge(analyzeFlow(lines), i);
+  for (const id of nodeIds) lines = deleteNode(analyzeFlow(lines), id);
+  const gone = new Set(nodeIds);
+  // Port keys are `from->to#n`
+  const touches = (key: string) => {
+    const [from, rest] = key.split('->');
+    return gone.has(from) || gone.has(rest?.split('#')[0]);
+  };
+  const overrides = withPorts(
+    withNodes(S().overrides, (n) => nodeIds.forEach((id) => delete n[id])),
+    (p) => Object.keys(p).forEach((k) => touches(k) && delete p[k]),
+  );
+  commit(lines, { select: null, overrides });
+}
+
+export interface NodeCopy {
+  id: string;
+  shape: FlowShape;
+  label: string;
+  classes: string[];
+  x: number;
+  y: number;
+  parent?: string;
+}
+
+// Paste nodes and the links between them, offset; selects the copies
+export function pasteMany(nodes: NodeCopy[], edges: { from: string; to: string; link: Link }[], offset: Pt) {
+  let lines = F().lines;
+  const ids = new Map<string, string>();
+  for (const n of nodes) {
+    const doc = analyzeFlow(lines);
+    const r = addNode(doc, n.shape, n.label, { classes: n.classes, subgraph: n.parent && doc.subgraphs.some((s) => s.id === n.parent) ? n.parent : undefined });
+    lines = r.lines;
+    ids.set(n.id, r.id);
+  }
+  for (const e of edges) {
+    const [a, b] = [ids.get(e.from), ids.get(e.to)];
+    if (a && b) lines = addEdge(analyzeFlow(lines), a, b, e.link).lines;
+  }
+  const fresh = new Set(ids.values());
+  const overrides = withNodes(S().overrides, (pos) => nodes.forEach((n) => (pos[ids.get(n.id)!] = { x: Math.round(n.x + offset.x), y: Math.round(n.y + offset.y) })));
+  const after = analyzeFlow(lines);
+  const multi: Selection[] = [...[...fresh].map((id) => ({ kind: 'node' as const, id })), ...after.edges.filter((e) => fresh.has(e.from) && fresh.has(e.to)).map((e) => ({ kind: 'edge' as const, index: e.index, line: e.line }))];
+  commit(lines, { multi, overrides });
+}
+
+// Move several nodes
+export function moveNodes(ids: string[], dx: number, dy: number) {
+  S().setOverrides(
+    withNodes(freeze(S().overrides), (n) =>
+      ids.forEach((id) => {
+        const o = n[id];
+        if (o) n[id] = { x: Math.round(o.x + dx), y: Math.round(o.y + dy) };
+      }),
+    ),
+  );
+}
+
 // Delete subgraph and contents
 export function deleteSubgraphWithContents(id: string) {
   const f = F();
@@ -169,15 +231,6 @@ export function addFlowItem(item: FlowPaletteItem, at?: Pt) {
 
 export function setShape(id: string, shape: FlowShape) {
   commit(setNodeShape(F(), id, shape), { select: { kind: 'node', id } });
-}
-
-// Paste a node copy
-export function pasteNode(shape: FlowShape, label: string, classes: string[], at: Pt, parent?: string) {
-  const f = F();
-  const { lines, id } = addNode(f, shape, label, { classes, subgraph: parent && f.subgraphs.some((s) => s.id === parent) ? parent : undefined });
-  const overrides = withNodes(S().overrides, (n) => (n[id] = { x: Math.round(at.x), y: Math.round(at.y) }));
-  commit(lines, { select: { kind: 'node', id }, overrides });
-  return id;
 }
 
 // Paste a link copy between the same nodes
