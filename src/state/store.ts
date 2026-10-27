@@ -48,6 +48,8 @@ interface State {
   flow: FlowDoc | null;
   flowLayout: FlowLayout | null;
   selection: Selection | null;
+  // Box / select-all selection (2+ items; `selection` is null then)
+  multi: Selection[];
   // Selection source
   selectionSource: 'canvas' | 'editor';
   editing: EditTarget | null;
@@ -63,9 +65,10 @@ interface State {
   typeCode(code: string): void;
   flush(): void;
   setAutoUpdate(on: boolean): void;
-  commit(lines: Line[] | FlowLine[], opts?: { select?: Selection | null; overrides?: LayoutOverrides; edit?: EditTarget }): void;
+  commit(lines: Line[] | FlowLine[], opts?: { select?: Selection | null; multi?: Selection[]; overrides?: LayoutOverrides; edit?: EditTarget }): void;
   setOverrides(overrides: LayoutOverrides): void;
   select(sel: Selection | null, source?: 'canvas' | 'editor'): void;
+  selectMany(items: Selection[]): void;
   setEditing(target: EditTarget | null): void;
   undo(): void;
   redo(): void;
@@ -209,6 +212,10 @@ export const useStore = create<State>((set, get) => {
     set({ past: [...past, { code, overrides }].slice(-HISTORY_LIMIT), future: [] });
   };
 
+  // One item selects it, two or more select them all
+  const pick = (select: Selection | null, multi: Selection[]) =>
+    multi.length === 1 ? { selection: multi[0], multi: [], selectionSource: 'canvas' as const } : { selection: multi.length ? null : select, multi, selectionSource: 'canvas' as const };
+
   const apply = (code: string, overrides: LayoutOverrides, extra: Partial<State> = {}) =>
     set({ code, overrides, ...derive(code, overrides), dirty: true, ...extra });
 
@@ -217,6 +224,7 @@ export const useStore = create<State>((set, get) => {
     overrides: emptyOverrides(),
     ...derive(initial, emptyOverrides()),
     selection: null,
+    multi: [],
     selectionSource: 'canvas',
     editing: null,
     fileName: 'untitled',
@@ -257,7 +265,7 @@ export const useStore = create<State>((set, get) => {
       const code = get().flow ? serializeFlow(lines as FlowLine[]) : serialize(lines as Line[]);
       const overrides = opts.overrides ?? get().overrides;
       apply(code, overrides, {
-        ...(opts.select !== undefined ? { selection: opts.select, selectionSource: 'canvas' as const } : {}),
+        ...(opts.select !== undefined || opts.multi ? pick(opts.select ?? null, opts.multi ?? []) : {}),
         ...(opts.edit ? { editing: opts.edit } : {}),
       });
     },
@@ -268,7 +276,12 @@ export const useStore = create<State>((set, get) => {
     },
 
     select(selection, source = 'canvas') {
-      set({ selection, selectionSource: source });
+      set({ selection, multi: [], selectionSource: source });
+    },
+
+    selectMany(items) {
+      if (items.length < 2) return get().select(items[0] ?? null);
+      set({ selection: null, multi: items, selectionSource: 'canvas' });
     },
 
     setEditing(editing) {
@@ -281,7 +294,7 @@ export const useStore = create<State>((set, get) => {
       const prev = past[past.length - 1];
       if (!prev) return;
       lastTyping = 0;
-      set({ past: past.slice(0, -1), future: [{ code, overrides }, ...future], selection: null, editing: null });
+      set({ past: past.slice(0, -1), future: [{ code, overrides }, ...future], selection: null, multi: [], editing: null });
       apply(prev.code, prev.overrides);
     },
 
@@ -291,7 +304,7 @@ export const useStore = create<State>((set, get) => {
       const next = future[0];
       if (!next) return;
       lastTyping = 0;
-      set({ past: [...past, { code, overrides }], future: future.slice(1), selection: null, editing: null });
+      set({ past: [...past, { code, overrides }], future: future.slice(1), selection: null, multi: [], editing: null });
       apply(next.code, next.overrides);
     },
 
@@ -309,6 +322,7 @@ export const useStore = create<State>((set, get) => {
         past: [],
         future: [],
         selection: null,
+        multi: [],
         editing: null,
       });
     },

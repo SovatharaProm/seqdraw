@@ -377,3 +377,25 @@ describe('draw.io-style links', () => {
     expect(e.points[1]).toEqual(bend);
   });
 });
+
+describe('adaptive layout inside subgraphs', () => {
+  it('puts links inside a subgraph between their own nodes', async () => {
+    const { elkLayout } = await import('./elk');
+    const code = '---\nconfig:\n  layout: elk\n---\nflowchart LR\n  Push([git push]) --> Build\n  subgraph ci [CI]\n    Build[Build] --> Test[Unit tests]\n    Test --> Lint[Lint]\n  end\n  subgraph cd [Delivery]\n    Stage[Deploy staging] -.-> Smoke{Smoke ok?}\n    Smoke ==>|yes| Prod[(Production)]\n  end\n  Lint --> Stage\n  Smoke -->|no| Push';
+    const doc = parseFlow(code);
+    const m = (t: string) => t.length * 7;
+    const auto = await elkLayout(doc, layoutFlow(doc, {}, m));
+    const L = layoutFlow(doc, {}, m, {}, auto);
+    const near = (p: { x: number; y: number }, id: string) => {
+      const n = L.nodes.find((q) => q.id === id)!;
+      return Math.abs(p.x - n.x) <= n.width / 2 + 1 && Math.abs(p.y - n.y) <= n.height / 2 + 1;
+    };
+    for (const e of L.edges) {
+      expect(near(e.points[0], e.from)).toBe(true);
+      expect(near(e.points[e.points.length - 1], e.to)).toBe(true);
+    }
+    // Code order kept: git push comes first, left of Build
+    const x = (id: string) => L.nodes.find((q) => q.id === id)!.x;
+    expect(x('Push')).toBeLessThan(x('Build'));
+  });
+});

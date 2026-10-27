@@ -37,8 +37,6 @@ const OPTIONS = {
   'elk.spacing.edgeEdge': '14',
   'elk.layered.spacing.edgeNodeBetweenLayers': '20',
   'elk.edgeLabels.inline': 'true',
-  // Edge routes in root coordinates
-  'elk.json.edgeCoords': 'ROOT',
 };
 
 // What ELK's result depends on (cache key)
@@ -62,10 +60,17 @@ export async function elkLayout(doc: FlowDoc, base: FlowLayout): Promise<AutoLay
   for (const s of doc.subgraphs) byId.set(s.id, { id: s.id, children: [], layoutOptions: { 'elk.padding': `[top=${TITLE_PAD},left=${PAD},bottom=${PAD},right=${PAD}]` } });
   for (const n of base.nodes) byId.set(n.id, { id: n.id, width: n.width, height: n.height });
   const parentOf = (id: string) => base.nodes.find((n) => n.id === id)?.parent ?? doc.subgraphs.find((s) => s.id === id)?.parent;
-  for (const [id, node] of byId) {
+  // Code order (ELK keeps it): a subgraph goes in where its first node appears
+  const placed = new Set<string>();
+  const place = (id: string) => {
+    if (placed.has(id)) return;
     const p = parentOf(id);
-    (p && byId.get(p)?.children ? byId.get(p)!.children! : root.children!).push(node);
-  }
+    if (p && byId.has(p)) place(p);
+    placed.add(id);
+    (p && byId.get(p)?.children ? byId.get(p)!.children! : root.children!).push(byId.get(id)!);
+  };
+  base.nodes.forEach((n) => place(n.id));
+  doc.subgraphs.forEach((sg) => place(sg.id));
   // Empty subgraphs need a size
   for (const s of doc.subgraphs) {
     const n = byId.get(s.id)!;
@@ -83,16 +88,19 @@ export async function elkLayout(doc: FlowDoc, base: FlowLayout): Promise<AutoLay
   const out = await elk.layout({ ...root, edges } as never);
 
   const result: AutoLayout = { nodes: {}, edges: {}, clusters: {} };
+  // Absolute origin of every container (edges are relative to theirs)
+  const origin = new Map<string, Pt>([['root', { x: 0, y: 0 }]]);
   const walk = (n: ElkNode, ox: number, oy: number) => {
     for (const c of n.children ?? []) {
       const box = { x: ox + (c.x ?? 0), y: oy + (c.y ?? 0), width: c.width ?? 0, height: c.height ?? 0 };
+      origin.set(c.id, { x: box.x, y: box.y });
       if (doc.subgraphs.some((s) => s.id === c.id)) result.clusters[c.id] = box;
       else result.nodes[c.id] = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
       walk(c, box.x, box.y);
     }
   };
   walk(out as ElkNode, 0, 0);
-  type ElkEdge = { id: string; sections?: { startPoint: Pt; endPoint: Pt; bendPoints?: Pt[] }[]; labels?: Box[] };
+  type ElkEdge = { id: string; container?: string; sections?: { startPoint: Pt; endPoint: Pt; bendPoints?: Pt[] }[]; labels?: Box[] };
   const allEdges: ElkEdge[] = [];
   const collect = (n: { edges?: ElkEdge[]; children?: unknown[] }) => {
     allEdges.push(...(n.edges ?? []));
@@ -103,9 +111,11 @@ export async function elkLayout(doc: FlowDoc, base: FlowLayout): Promise<AutoLay
     const s = e.sections?.[0];
     if (!s) continue;
     const l = e.labels?.[0];
+    const o = origin.get(e.container ?? 'root') ?? { x: 0, y: 0 };
+    const abs = (p: Pt) => ({ x: p.x + o.x, y: p.y + o.y });
     result.edges[Number(e.id.slice(1))] = {
-      points: [s.startPoint, ...(s.bendPoints ?? []), s.endPoint],
-      label: l ? { x: l.x + l.width / 2, y: l.y + l.height / 2 } : undefined,
+      points: [s.startPoint, ...(s.bendPoints ?? []), s.endPoint].map(abs),
+      label: l ? abs({ x: l.x + l.width / 2, y: l.y + l.height / 2 }) : undefined,
     };
   }
   return result;
