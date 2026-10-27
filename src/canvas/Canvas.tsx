@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type PointerEvent as RPointerEvent } from 'react';
-import { nearestParticipant } from '../core/layout';
+import { alignParticipant, nearestParticipant } from '../core/layout';
 import { contentEnd } from '../core/ops';
 import { DiagramContent } from '../render/DiagramSvg';
 import { FlowContent } from '../render/FlowSvg';
@@ -17,7 +17,7 @@ import { GroupOutline, MarqueeBox } from './GroupOverlay';
 import { allItems, itemsInRect, rectOf } from './marquee';
 import { lineSelection, useStore, type Selection } from '../state/store';
 import { inkOf, InlineEditor } from './InlineEditor';
-import { alignParticipant, DragOverlay, SelectionOverlay } from './SequenceOverlay';
+import { DragOverlay, SelectionOverlay } from './SequenceOverlay';
 import type { Drag, Pt, View } from './types';
 import { keys } from '../lib/platform';
 

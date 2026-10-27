@@ -1,6 +1,6 @@
 // SVG renderer
 import type { ReactNode } from 'react';
-import type { LFrame, LMessage, LNote, LParticipant, Layout } from '../core/layout';
+import { selfPath, type LFrame, type LMessage, type LNote, type LParticipant, type Layout } from '../core/layout';
 import { FONT_SIZE, LINE_HEIGHT } from '../core/measure';
 import { participantColors, type Theme } from '../core/themes';
 
@@ -125,7 +125,6 @@ export function ParticipantShape({ p, y, t }: { p: LParticipant; y: number; t: T
 }
 
 // Self message curve
-export const selfPath = (x1: number, y: number, x2: number) => `M${x1} ${y} C${x1 + SELF_W * 1.2} ${y - 6}, ${x1 + SELF_W * 1.2} ${y + 34}, ${x2} ${y + 28}`;
 
 function arrowHead(x: number, y: number, dir: 1 | -1, kind: 'arrow' | 'open' | 'cross', color: string): ReactNode {
   if (kind === 'arrow')

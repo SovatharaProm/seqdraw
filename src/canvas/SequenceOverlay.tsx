@@ -1,7 +1,7 @@
 // Sequence diagram canvas overlays
-import { dropLine, nearestParticipant, participantBottom, type Layout } from '../core/layout';
+import { dropLine, nearestParticipant, participantBottom, selfPath, type Layout } from '../core/layout';
 import type { Theme } from '../core/themes';
-import { ParticipantShape, selfPath, StatementShape } from '../render/DiagramSvg';
+import { ParticipantShape, StatementShape } from '../render/DiagramSvg';
 import * as actions from '../state/actions';
 import type { Selection } from '../state/store';
 import type { Drag } from './types';
@@ -53,23 +53,6 @@ export function SelectionOverlay({ layout, selection, k }: { layout: Layout; sel
   }
   const f = layout.frames.find((q) => q.line === selection.line);
   return f ? <rect x={f.x1 - pad} y={f.y1 - pad} width={f.x2 - f.x1 + pad * 2} height={f.y2 - f.y1 + pad * 2} rx={3} {...style} strokeDasharray={`${6 / k} ${4 / k}`} /> : null;
-}
-
-// Snap lifelines and header rows to other participants
-const SNAP = 8;
-export function alignParticipant(layout: Layout, id: string, dx: number, dy: number, k: number): { dx: number; dy: number; guideX?: number; guideY?: number } {
-  const p = layout.participants.find((q) => q.id === id);
-  if (!p) return { dx, dy };
-  const x = p.x + dx;
-  const y = p.top + dy;
-  let bestX: number | undefined;
-  let bestY: number | undefined;
-  for (const q of layout.participants) {
-    if (q.id === id) continue;
-    if (Math.abs(q.x - x) < SNAP / k && (bestX === undefined || Math.abs(q.x - x) < Math.abs(bestX - x))) bestX = q.x;
-    if (Math.abs(q.top - y) < SNAP / k && (bestY === undefined || Math.abs(q.top - y) < Math.abs(bestY - y))) bestY = q.top;
-  }
-  return { dx: bestX !== undefined ? bestX - p.x : dx, dy: bestY !== undefined ? bestY - p.top : dy, guideX: bestX, guideY: bestY };
 }
 
 export function DragOverlay({ drag: d, layout, theme, k, end }: { drag: Drag; layout: Layout; theme: Theme; k: number; end: number }) {
