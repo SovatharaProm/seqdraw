@@ -14,8 +14,10 @@ import { InspectorPanel } from './Panel';
 
 const SHAPES: Option<FlowShape>[] = FLOW_SHAPES.map((s) => ({ value: s.shape, label: s.name }));
 
+const NO_NODES: never[] = [];
+
 function useNodeOptions(): Option<string>[] {
-  const nodes = useStore((s) => s.flow?.nodes ?? []);
+  const nodes = useStore((s) => s.flow?.nodes ?? NO_NODES);
   return nodes.map((n) => ({ value: n.id, label: isFreeEnd(n) ? `${n.id} · free end` : n.label === n.id ? n.id : `${n.id} · ${n.label}` }));
 }
 

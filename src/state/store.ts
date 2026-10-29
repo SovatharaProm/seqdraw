@@ -160,6 +160,8 @@ const measureText = () => measureFor(THEMES['redux-color'].fontFamily, THEMES['r
 // Adaptive (ELK) results by layout signature
 const elkCache = new Map<string, AutoLayout>();
 const ELK_CACHE_MAX = 8;
+// Running ELK jobs by signature
+const elkRunning = new Set<string>();
 // Fit once the next ELK result lands (new diagram, engine switch)
 let fitOnElk = false;
 export const fitAfterLayout = () => (fitOnElk = true);
@@ -171,7 +173,9 @@ function flowLayoutOf(flow: FlowDoc, overrides: LayoutOverrides, measure: Measur
   const auto = elkCache.get(sig);
   if (auto) return layoutFlow(flow, overrides.nodes ?? {}, measure, overrides.ports ?? {}, auto, overrides.sizes);
   // Dagre now, ELK when ready
-  elkLayout(flow, base).then((result) => {
+  if (elkRunning.has(sig)) return base;
+  elkRunning.add(sig);
+  elkLayout(flow, base).finally(() => elkRunning.delete(sig)).then((result) => {
     elkCache.set(sig, result);
     if (elkCache.size > ELK_CACHE_MAX) elkCache.delete(elkCache.keys().next().value!);
     const s = useStore.getState();

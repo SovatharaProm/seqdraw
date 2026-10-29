@@ -51,9 +51,12 @@ export function layoutSignature(doc: FlowDoc, base: FlowLayout): string {
 
 type ElkNode = { id: string; width?: number; height?: number; x?: number; y?: number; children?: ElkNode[]; layoutOptions?: Record<string, string> };
 
+// Shared ELK instance
+let elkInstance: Promise<{ layout(graph: never): Promise<unknown> }> | null = null;
+const getElk = () => (elkInstance ??= import('elkjs/lib/elk.bundled.js').then(({ default: ELK }) => new ELK() as never));
+
 export async function elkLayout(doc: FlowDoc, base: FlowLayout): Promise<AutoLayout> {
-  const { default: ELK } = await import('elkjs/lib/elk.bundled.js');
-  const elk = new ELK();
+  const elk = await getElk();
   // Nest nodes inside their subgraphs
   const byId = new Map<string, ElkNode>();
   const root: ElkNode = { id: 'root', children: [], layoutOptions: { ...OPTIONS, 'elk.direction': DIRECTION[doc.dir] } };
