@@ -4,7 +4,6 @@ import { selfPath, type LFrame, type LMessage, type LNote, type LParticipant, ty
 import { FONT_SIZE, LINE_HEIGHT } from '../core/measure';
 import { participantColors, type Theme } from '../core/themes';
 
-const SELF_W = 40;
 const HEAD = 9;
 
 function Text({ lines, x, y, fill, anchor = 'middle', weight }: { lines: string[]; x: number; y: number; fill: string; anchor?: 'start' | 'middle' | 'end'; weight?: string | number }) {
@@ -150,7 +149,7 @@ function Message({ m, t }: { m: LMessage; t: Theme }) {
     endX = m.x2;
     d = selfPath(m.x1, m.y, m.x2);
     endDir = -1;
-    labelX = m.x1 + SELF_W / 2;
+    labelX = (m.x1 + m.x2) / 2;
   } else {
     endY = m.y;
     endX = m.x2;
@@ -210,7 +209,7 @@ function Frame({ f, t }: { f: LFrame; t: Theme }) {
       </text>
       {f.label && (
         <g data-kind="frame-label" data-line={f.line}>
-          <Text lines={[`[${f.label}]`]} x={(f.x1 + tabW + f.x2) / 2} y={f.y1 + 1} fill={t.text} />
+          <Text lines={[`[${f.label}]`]} x={(f.x1 + f.x2) / 2} y={f.y1 + 1} fill={t.text} />
         </g>
       )}
       {f.sections.map((s) => (

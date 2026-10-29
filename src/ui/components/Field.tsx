@@ -15,6 +15,18 @@ export function Field({ label, children }: { label: string; children: ReactNode 
   );
 }
 
+// On/off switch row
+export function SwitchField({ label, on, onChange, title }: { label: string; on: boolean; onChange: (on: boolean) => void; title?: string }) {
+  return (
+    <label className="switch" title={title}>
+      <button role="switch" aria-checked={on} className={on ? 'on' : ''} onClick={() => onChange(!on)}>
+        <span />
+      </button>
+      {label}
+    </label>
+  );
+}
+
 // Two fields side by side
 export const FieldPair = ({ children }: { children: ReactNode }) => <div className="field-pair">{children}</div>;
 

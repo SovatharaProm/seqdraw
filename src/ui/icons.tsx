@@ -47,6 +47,7 @@ export const Icons = {
   close: () => <Icon><path d="M4 4l8 8M12 4l-8 8" /></Icon>,
   play: () => <Icon><path d="M5 3.5v9l7-4.5z" /></Icon>,
   chevronLeft: () => <Icon><path d="M10 3.5 5.5 8l4.5 4.5" /></Icon>,
+  chevronRight: () => <Icon><path d="M6 3.5 10.5 8 6 12.5" /></Icon>,
   shapes: () => <Icon><rect x="2" y="2" width="5" height="5" rx="1" /><circle cx="11.5" cy="4.5" r="2.5" /><path d="M4.5 9.5 7 14H2zM9 9h5v5H9z" /></Icon>,
   trash: () => <Icon><path d="M2.5 4h11M6 4V2.5h4V4M4 4l.7 9.5h6.6L12 4M6.8 6.5v4.5M9.2 6.5v4.5" /></Icon>,
   undo: () => <Icon><path d="M5.5 3 2.5 6l3 3" /><path d="M2.5 6h7a4 4 0 0 1 0 8H7" /></Icon>,

@@ -77,6 +77,7 @@ export interface FlowLayout {
 }
 
 export type NodePositions = Record<string, { x: number; y: number }>;
+export type NodeSizes = Record<string, { w: number; h: number }>;
 // Link drawing
 export type LineShape = 'auto' | 'ortho' | 'straight' | 'curved';
 
@@ -381,7 +382,7 @@ export function clip(n: { x: number; y: number; width: number; height: number; s
   return { x: n.x + dx * t, y: n.y + dy * t };
 }
 
-export function layoutFlow(doc: FlowDoc, positions: NodePositions, measure: Measure = measureText, ports: EdgePorts = {}, auto?: AutoLayout): FlowLayout {
+export function layoutFlow(doc: FlowDoc, positions: NodePositions, measure: Measure = measureText, ports: EdgePorts = {}, auto?: AutoLayout, sizes: NodeSizes = {}): FlowLayout {
   // Ignore old offset entries
   const posOf = (id: string) => {
     const p = positions[id];
@@ -398,7 +399,10 @@ export function layoutFlow(doc: FlowDoc, positions: NodePositions, measure: Meas
     const label = labelLines(n.label);
     // Blank shape: default size
     const t = !n.label.trim() && n.shape !== 'text' ? { w: BLANK_W, h: LINE_HEIGHT } : blockSize(label, measure);
-    const { w, h } = flowShapeOf(n.shape).size(t.w, t.h);
+    const fit = flowShapeOf(n.shape).size(t.w, t.h);
+    // Hand-set size
+    const w = sizes[n.id]?.w ?? fit.w;
+    const h = sizes[n.id]?.h ?? fit.h;
     const style: FlowStyle = parseStyle(doc.classDefs.default);
     n.classes.forEach((c) => parseStyle(doc.classDefs[c], style));
     parseStyle(n.style, style);

@@ -108,9 +108,8 @@ function patchRef(doc: FlowDoc, id: string, fn: (r: NodeRef) => NodeRef): FlowLi
 const bracket = (r: NodeRef, patch: Partial<NodeRef>): NodeRef => ({ id: r.id, shape: r.shape ?? 'rect', text: r.text, classes: r.classes, ...patch });
 
 export function setNodeLabel(doc: FlowDoc, id: string, label: string): FlowLine[] {
-  label = label.trim();
-  if (!label) return doc.lines;
-  return patchRef(doc, id, (r) => bracket(r, { text: label }));
+  // Cleared: blank shape
+  return patchRef(doc, id, (r) => bracket(r, { text: label.trim() || ' ' }));
 }
 
 export function setNodeShape(doc: FlowDoc, id: string, shape: FlowShape): FlowLine[] {

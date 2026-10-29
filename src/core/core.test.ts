@@ -100,6 +100,10 @@ describe('ops', () => {
     expect(serialize(renameParticipant(doc, 'A', 'Alice'))).toBe('sequenceDiagram\n    Alice->>B: hi\n    Note over Alice: x');
     const aliased = parse(serialize(renameParticipant(doc, 'A', 'Web: client')));
     expect(aliased.participants[0]).toMatchObject({ id: 'A', label: 'Web: client' });
+    // Cleared label: blank box
+    const code = serialize(renameParticipant(doc, 'A', ''));
+    expect(code).toContain('participant A as #nbsp;');
+    expect(parse(code).participants[0].label.trim()).toBe('');
   });
 
   it('adds a participant at a position', () => {

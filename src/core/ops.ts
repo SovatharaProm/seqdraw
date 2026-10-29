@@ -1,4 +1,5 @@
 // Line operations
+import { toMermaidText } from './measure';
 import { analyze } from './parser';
 import type { ArrowToken, BlockKind, DiagramConfig, Doc, Line, NotePlacement, ParticipantKind, Statement } from './model';
 
@@ -101,7 +102,9 @@ export function addParticipant(doc: Doc, kind: ParticipantKind, label: string, i
 export function renameParticipant(doc: Doc, id: string, label: string): Line[] {
   label = label.trim();
   const p = doc.participants.find((x) => x.id === id);
-  if (!p || !label) return doc.lines;
+  if (!p) return doc.lines;
+  // Cleared: blank box
+  const alias = label ? toMermaidText(label) : '#nbsp;';
   const hasAlias = p.label !== p.id;
   const canRenameId = !hasAlias && VALID_ID.test(label) && !/\sas\s/.test(label) && !doc.participants.some((x) => x.id === label);
   if (canRenameId) {
@@ -125,9 +128,9 @@ export function renameParticipant(doc: Doc, id: string, label: string): Line[] {
   }
   if (p.declLine !== undefined) {
     const s = doc.lines[p.declLine].stmt as Statement & { type: 'participant' };
-    return setStatement(doc.lines, p.declLine, { ...s, alias: label });
+    return setStatement(doc.lines, p.declLine, { ...s, alias });
   }
-  return insertStatements(doc.lines, preambleEnd(doc.lines), [{ type: 'participant', kind: p.kind, id, alias: label }]);
+  return insertStatements(doc.lines, preambleEnd(doc.lines), [{ type: 'participant', kind: p.kind, id, alias }]);
 }
 
 export function setParticipantKind(doc: Doc, id: string, kind: ParticipantKind): Line[] {

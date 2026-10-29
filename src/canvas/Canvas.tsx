@@ -6,7 +6,7 @@ import { FlowContent } from '../render/FlowSvg';
 import { editableEdge, middleSegment, movedRoute, nodeAt, sideAt } from '../flow/layout';
 import * as actions from '../state/actions';
 import * as flowActions from '../state/flowActions';
-import { alignNode, edgeEndAt, EndHover, FlowDragOverlay, FlowHandles, FlowSelectionOverlay, bendsAfter, snapBend, snapTarget, type FlowDrag } from './FlowOverlay';
+import { alignNode, edgeEndAt, EndHover, FlowDragOverlay, FlowHandles, FlowSelectionOverlay, bendsAfter, resizedBox, snapBend, snapTarget, type FlowDrag } from './FlowOverlay';
 import type { Side } from '../flow/model';
 import { Icons } from '../ui/icons';
 import { FIT_EVENT } from '../lib/fit';
@@ -43,7 +43,7 @@ function toggleSelected(item: Selection) {
 }
 
 // Handles of the selected link
-const LINK_HANDLES = new Set(['from', 'to', 'segment', 'bend', 'bend-new']);
+const LINK_HANDLES = new Set(['from', 'to', 'segment', 'bend', 'bend-new', 'flow-resize']);
 
 // Everything selected (⌘A): drag moves the diagram
 const allSelected = () => {
@@ -266,6 +266,14 @@ export function Canvas() {
     const { select, flowLayout: FL } = useStore.getState();
     const handle = target.closest<SVGElement>('[data-handle]');
     const h = handle?.dataset.handle;
+    // Corner of the selected node
+    if (h === 'flow-resize' && FL && selection?.kind === 'node') {
+      const n = FL.nodes.find((q) => q.id === selection.id);
+      if (n) {
+        const from = { x: n.x, y: n.y, w: n.width, h: n.height };
+        return updateDrag({ type: 'flow-resize', id: n.id, start: p, sx: Number(handle!.dataset.sx) as 1 | -1, sy: Number(handle!.dataset.sy) as 1 | -1, from, box: from });
+      }
+    }
     // Segment of the selected link
     if (h === 'segment' && FL && selection?.kind === 'edge') {
       const e = FL.edges.find((q) => q.index === selection.index);
@@ -381,6 +389,9 @@ export function Canvas() {
       case 'flow-reconnect':
         updateDrag({ ...d, to: p, free: e.altKey });
         break;
+      case 'flow-resize':
+        updateDrag({ ...d, box: resizedBox(d, p) });
+        break;
       case 'flow-segment':
         updateDrag({ ...d, delta: Math.round(d.axis === 'x' ? p.x - d.start.x : p.y - d.start.y) });
         break;
@@ -466,7 +477,7 @@ export function Canvas() {
         const snap = flowLayout && snapTarget(flowLayout, d.to, view.k, { toward: d.start, free: d.free });
         const travelled = Math.hypot(d.to.x - d.start.x, d.to.y - d.start.y);
         if (snap && (snap.node.id !== d.from || travelled > 30)) flowActions.connectNodes(d.from, snap.node.id, { from: d.fromSide, to: snap.side, toAt: snap.at });
-        else if (!snap && travelled > 40) flowActions.connectToNew(d.from, d.to, d.fromSide);
+        else if (!snap && travelled > 40) flowActions.connectToFree(d.from, d.to, d.fromSide);
         setFlowHover(null);
         break;
       }
@@ -480,6 +491,9 @@ export function Canvas() {
         else if (Math.hypot(d.to.x - d.start.x, d.to.y - d.start.y) > 8 / view.k) flowActions.detachEdge(d.index, d.end, d.to);
         break;
       }
+      case 'flow-resize':
+        if (d.box !== d.from) flowActions.resizeNode(d.id, d.box);
+        break;
       case 'flow-bend':
         if (d.moved) flowActions.setEdgeBends(d.index, bendsAfter(d));
         break;
@@ -502,6 +516,7 @@ export function Canvas() {
     const hit = document.elementFromPoint(e.clientX, e.clientY);
     const bend = hit?.closest<SVGElement>('[data-handle="bend"]');
     const sel = useStore.getState().selection;
+    if (hit?.closest('[data-handle="flow-resize"]') && sel?.kind === 'node') return flowActions.resetNodeSize(sel.id);
     if (bend && sel?.kind === 'edge') {
       const edge = useStore.getState().flowLayout?.edges.find((q) => q.index === sel.index);
       if (edge) flowActions.setEdgeBends(edge.index, edge.points.slice(1, -1).filter((_, j) => j !== Number(bend.dataset.i)));
@@ -575,6 +590,7 @@ export function Canvas() {
           <g transform={drag?.type === 'diagram' ? `translate(${drag.dx} ${drag.dy})` : undefined}>
           {drag?.type === 'participant' && drag.moved && <style>{drag.ids.map((id) => `.diagram-main [data-kind="participant"][data-id="${CSS.escape(id)}"]`).join(', ') + ' { opacity: 0.25; }'}</style>}
           {drag?.type === 'statement' && drag.moved && <style>{`.diagram-main [data-line="${drag.line}"] { opacity: 0.25; }`}</style>}
+          {drag?.type === 'flow-resize' && <style>{`.diagram-main [data-kind="node"][data-id="${CSS.escape(drag.id)}"] { opacity: 0.25; }`}</style>}
           {drag?.type === 'node' && drag.moved && <style>{drag.ids.map((id) => `.diagram-main [data-kind="node"][data-id="${CSS.escape(id)}"]`).join(', ') + ' { opacity: 0.25; }'}</style>}
           <g className="diagram-main">
             {flowLayout ? <FlowContent layout={flowLayout} theme={theme} background={false} /> : <DiagramContent layout={layout} theme={theme} background={false} />}

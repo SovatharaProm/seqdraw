@@ -8,6 +8,7 @@ import { LinkButton } from '../components/Button';
 import { Field, FieldPair, SelectField, TextField, type Option } from '../components/Field';
 import { Icons } from '../icons';
 import { ACTIVATIONS, BLOCK_KINDS, HEAD_STYLES, LINE_STYLES, NOTE_PLACEMENTS } from './options';
+import { FitTextSwitch } from './FitTextSwitch';
 import { InspectorPanel } from './Panel';
 
 type Stmt<T extends Statement['type']> = Statement & { type: T };
@@ -22,16 +23,14 @@ function useParticipantOptions(): Option<string>[] {
 
 function ParticipantPanel({ selection, id }: { selection: Selection; id: string }) {
   const p = useStore((s) => s.doc.participants.find((x) => x.id === id));
-  const ov = useStore((s) => s.overrides.participants[id]);
   if (!p) return null;
   return (
     <InspectorPanel title="Participant" selection={selection}>
       <Field label="Label">
-        <TextField label="Label" value={p.label} onCommit={(v) => actions.setText({ kind: 'participant', id }, v)} />
+        <TextField label="Label" value={p.label.trim()} onCommit={(v) => actions.setText({ kind: 'participant', id }, v)} />
       </Field>
       <SelectField label="Shape" value={p.kind} options={SHAPES} onChange={(k) => actions.changeParticipantKind(id, k)} />
-      {(ov?.width || ov?.height || ov?.gap !== undefined) && <LinkButton onClick={() => actions.resetParticipantSize(id)}>Reset size</LinkButton>}
-      {(ov?.gap !== undefined || ov?.x !== undefined || ov?.y !== undefined || ov?.stretch !== undefined) && <LinkButton onClick={() => actions.resetParticipantPosition(id)}>Reset position</LinkButton>}
+      <FitTextSwitch onFit={() => actions.fitParticipant(id)} />
     </InspectorPanel>
   );
 }

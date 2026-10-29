@@ -8,6 +8,7 @@ import type { FlowDir, FlowDoc, FlowLine, FlowShape, Link, Side } from '../flow/
 import { addEdge, addNode, addSubgraph, deleteEdge, deleteNode, flowInsertLine, renameSubgraph, reverseEdge as reverseEdgeOp, setDirection, setEdge, setNodeLabel, setNodeShape, uniqueNodeId, unwrapSubgraph } from '../flow/ops';
 import { analyzeFlow } from '../flow/parser';
 import { isFreeEnd } from '../flow/shapes';
+import { usePanel } from './panel';
 import { current as S, fitAfterLayout, type FlowSelection, type Selection } from './store';
 
 export type FlowPaletteItem = `flow:${FlowShape}` | 'subgraph';
@@ -91,6 +92,14 @@ const withNodes = (o: LayoutOverrides, fn: (nodes: NonNullable<LayoutOverrides['
   return { ...o, nodes };
 };
 
+// Forget hand-set sizes
+const dropSizes = (o: LayoutOverrides, ids: string[]): LayoutOverrides => {
+  if (!o.sizes || !ids.some((id) => o.sizes![id])) return o;
+  const sizes = { ...o.sizes };
+  ids.forEach((id) => delete sizes[id]);
+  return { ...o, sizes };
+};
+
 // Textbox -> label
 const toLabel = (text: string) => text.trim().replace(/\r?\n/g, '<br/>');
 
@@ -109,14 +118,20 @@ const edgeAt = (lines: FlowLine[], line: number): Selection | null => {
 
 export function flowEditText(t: FlowSelection): string {
   const f = F();
-  if (t.kind === 'node') return fromMermaidText(f.nodes.find((n) => n.id === t.id)?.label ?? '');
+  if (t.kind === 'node') return fromMermaidText(f.nodes.find((n) => n.id === t.id)?.label.trim() ?? '');
   if (t.kind === 'edge') return fromMermaidText(f.edges[t.index]?.spec.text ?? '');
   return f.subgraphs.find((s) => s.id === t.id)?.title ?? '';
 }
 
 export function flowSetText(t: FlowSelection, text: string) {
   const f = F();
-  if (t.kind === 'node') return commit(setNodeLabel(f, t.id, toLabel(text)), { select: t });
+  if (t.kind === 'node') {
+    // Keep the size unless fitting to text
+    const n = S().flowLayout?.nodes.find((q) => q.id === t.id);
+    const o = S().overrides;
+    const overrides = usePanel.getState().fitText ? dropSizes(o, [t.id]) : n && !o.sizes?.[t.id] ? { ...o, sizes: { ...(o.sizes ?? {}), [t.id]: { w: n.width, h: n.height } } } : o;
+    return commit(setNodeLabel(f, t.id, toLabel(text)), { select: t, overrides });
+  }
   if (t.kind === 'edge') return commit(setEdge(f, t.index, { text: toLabel(text) || undefined }), { select: t });
   const lines = renameSubgraph(f, t.id, text.replace(/\s*\n\s*/g, ' '));
   const sg = analyzeFlow(lines).subgraphs.find((s) => s.line === f.subgraphs.find((x) => x.id === t.id)?.line);
@@ -128,7 +143,7 @@ export function flowDelete(sel: FlowSelection) {
   if (sel.kind === 'node') {
     // Drop its offset and pinned links
     const overrides = withPorts(
-      withNodes(S().overrides, (n) => delete n[sel.id]),
+      withNodes(dropSizes(S().overrides, [sel.id]), (n) => delete n[sel.id]),
       (p) => Object.keys(p).forEach((k) => (k.startsWith(`${sel.id}->`) || k.includes(`->${sel.id}#`)) && delete p[k]),
     );
     return commit(deleteNode(f, sel.id), { select: null, overrides });
@@ -150,7 +165,7 @@ export function flowDeleteMany(nodeIds: string[], edgeIndexes: number[]) {
     return gone.has(from) || gone.has(rest?.split('#')[0]);
   };
   const overrides = withPorts(
-    withNodes(S().overrides, (n) => nodeIds.forEach((id) => delete n[id])),
+    withNodes(dropSizes(S().overrides, nodeIds), (n) => nodeIds.forEach((id) => delete n[id])),
     (p) => Object.keys(p).forEach((k) => touches(k) && delete p[k]),
   );
   commit(lines, { select: null, overrides });
@@ -266,13 +281,37 @@ export function connectNodes(from: string, to: string, sides: EdgePort = {}) {
   commit(lines, { select, overrides: withPorts(S().overrides, (p) => pin(p, keyOf(lines, select), sides)) });
 }
 
-// Drag to empty space: new node
-export function connectToNew(from: string, at: Pt, side?: Side) {
+// Free link end node
+const declareFree = (lines: FlowLine[], id: string) => {
+  const at = flowInsertLine(analyzeFlow(lines));
+  const out = lines.slice();
+  out.splice(at, 0, { raw: null, indent: '', stmt: { type: 'chain', groups: [[{ id, shape: 'text', text: '' }]], links: [] } });
+  return out;
+};
+
+// Drag to empty space: link with a free end
+export function connectToFree(from: string, at: Pt, side?: Side) {
   const f = F();
-  const parent = clusterAt(S().flowLayout!, at)?.id ?? f.nodes.find((n) => n.id === from)?.parent;
-  const { lines, id, line } = addNode(f, 'rect', 'Step', { from, subgraph: parent });
-  const overrides = withPorts(S().overrides, (p) => pin(p, keyOf(lines, edgeAt(lines, line)), { from: side }));
-  commit(lines, { select: { kind: 'node', id }, edit: { kind: 'node', id }, overrides });
+  const id = uniqueNodeId(f, 'free');
+  const { lines, line } = addEdge(analyzeFlow(declareFree(f.lines, id)), from, id);
+  const select = edgeAt(lines, line);
+  const placed = withNodes(S().overrides, (n) => (n[id] = { x: Math.round(at.x), y: Math.round(at.y) }));
+  commit(lines, { select, overrides: withPorts(placed, (p) => pin(p, keyOf(lines, select), { from: side })) });
+}
+
+// Resize a node (center and size)
+export function resizeNode(id: string, box: { x: number; y: number; w: number; h: number }) {
+  const r = Math.round;
+  const o = withNodes(freeze(S().overrides), (n) => (n[id] = { x: r(box.x), y: r(box.y) }));
+  S().setOverrides({ ...o, sizes: { ...(o.sizes ?? {}), [id]: { w: r(box.w), h: r(box.h) } } });
+}
+
+// Back to the label's size
+export function resetNodeSize(id: string) {
+  const sizes = { ...(S().overrides.sizes ?? {}) };
+  if (!sizes[id]) return;
+  delete sizes[id];
+  S().setOverrides({ ...freeze(S().overrides), sizes });
 }
 
 export function updateEdge(index: number, patch: Partial<Link> & { from?: string; to?: string }, sides?: EdgePort, extra?: { lines?: (l: FlowLine[]) => FlowLine[]; place?: Record<string, Pt> }) {
@@ -312,13 +351,7 @@ export function detachEdge(index: number, end: 'from' | 'to', at: Pt) {
   // Already free: just move it
   if (cur && isFreeEnd(cur)) return S().setOverrides(withNodes(freeze(S().overrides), (n) => (n[cur.id] = pos)));
   const id = uniqueNodeId(f, 'free');
-  const declare = (lines: FlowLine[]) => {
-    const at = flowInsertLine(analyzeFlow(lines));
-    const out = lines.slice();
-    out.splice(at, 0, { raw: null, indent: '', stmt: { type: 'chain', groups: [[{ id, shape: 'text', text: '' }]], links: [] } });
-    return out;
-  };
-  updateEdge(index, { [end]: id }, undefined, { lines: declare, place: { [id]: pos } });
+  updateEdge(index, { [end]: id }, undefined, { lines: (lines) => declareFree(lines, id), place: { [id]: pos } });
 }
 
 // Edit one link's ports entry

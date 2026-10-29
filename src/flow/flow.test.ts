@@ -101,6 +101,8 @@ describe('flowchart ops', () => {
     // Label added to a bare ref
     const bare = parseFlow('flowchart TD\n    X --> Y');
     expect(serializeFlow(setNodeLabel(bare, 'Y', 'Why (not)'))).toContain('X --> Y["Why (not)"]');
+    // Cleared label: blank shape
+    expect(serializeFlow(setNodeLabel(doc, 'B', ''))).toContain('A[Start] --> B{" "}');
   });
 
   it('adds nodes and edges before trailing styles', () => {
@@ -148,6 +150,12 @@ describe('flowchart layout', () => {
     const lr = layoutFlow(parseFlow('flowchart LR\n  A --> B'), {});
     expect(lr.nodes[1].x).toBeGreaterThan(lr.nodes[0].x);
     expect(lr.edges[0].points.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('uses hand-set node sizes', () => {
+    const L = layoutFlow(parseFlow('flowchart TD\n  A --> B'), {}, undefined, {}, undefined, { A: { w: 200, h: 90 } });
+    expect(L.nodes[0]).toMatchObject({ width: 200, height: 90 });
+    expect(L.nodes[1].width).not.toBe(200);
   });
 
   it('wraps subgraph children', () => {

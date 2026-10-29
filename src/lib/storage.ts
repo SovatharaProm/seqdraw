@@ -9,6 +9,7 @@ const STORAGE_KEYS = {
   codeSize: 'seqdraw.code.size',
   codeSplit: 'seqdraw.code.split',
   zoomBar: 'seqdraw.zoomBar',
+  fitText: 'seqdraw.fitText',
 } as const;
 
 export type StorageKey = keyof typeof STORAGE_KEYS;

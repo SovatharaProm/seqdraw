@@ -12,6 +12,7 @@ import {
   type ParseError,
   type Statement,
 } from './model';
+import { decodeEntities } from './measure';
 import { isParticipantKind } from './participants';
 
 // Participant id
@@ -166,7 +167,7 @@ export function analyze(lines: Line[]): Doc {
       case 'participant': {
         const p = touch(s.id);
         p.kind = s.kind;
-        p.label = s.alias ?? s.id;
+        p.label = s.alias !== undefined ? decodeEntities(s.alias) : s.id;
         p.declLine = i;
         break;
       }

@@ -9,6 +9,7 @@ import { LinkButton } from '../components/Button';
 import { Field, FieldPair, SelectField, TextField, type Option } from '../components/Field';
 import { Icons } from '../icons';
 import { LINE_SHAPES, LINK_HEADS, LINK_LENGTHS, LINK_STROKES, LINK_WAYS, SIDES } from './options';
+import { FitTextSwitch } from './FitTextSwitch';
 import { InspectorPanel } from './Panel';
 
 const SHAPES: Option<FlowShape>[] = FLOW_SHAPES.map((s) => ({ value: s.shape, label: s.name }));
@@ -24,11 +25,8 @@ function NodePanel({ selection, id }: { selection: Selection; id: string }) {
   if (!n) return null;
   return (
     <InspectorPanel title="Node" selection={selection}>
-      <Field label="Label">
-        <TextField multiline label="Label" value={fromMermaidText(n.label)} onCommit={(v) => actions.setText(selection, v)} />
-      </Field>
       <SelectField label="Shape" value={n.shape} options={SHAPES} onChange={(shape) => flowActions.setShape(id, shape)} />
-      <p className="hint">Id <code>{n.id}</code>. Hover the node and drag a dot to connect it.</p>
+      <FitTextSwitch onFit={() => flowActions.resetNodeSize(id)} />
       {placed && <LinkButton onClick={flowActions.autoLayout}>Auto layout (re-arrange all)</LinkButton>}
     </InspectorPanel>
   );
