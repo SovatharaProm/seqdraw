@@ -37,13 +37,20 @@ function bodyStart(lines: string[]): number {
   return i + 1;
 }
 
+// Last blank check (run by several store selectors per update)
+let blankFor: string | null = null;
+let blankResult = true;
+
 // Nothing drawn yet
 export function isBlankDiagram(code: string): boolean {
+  if (code === blankFor) return blankResult;
   const lines = code.split(/\r?\n/);
-  return lines.slice(bodyStart(lines)).every((l) => {
+  blankFor = code;
+  blankResult = lines.slice(bodyStart(lines)).every((l) => {
     const t = l.trim();
     return !t || t.startsWith('%%') || HEADER.test(t);
   });
+  return blankResult;
 }
 
 // Blank code with a kind's header

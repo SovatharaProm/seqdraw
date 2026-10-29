@@ -1,5 +1,5 @@
 // Flowchart SVG renderer
-import type { ReactNode } from 'react';
+import { memo, type ReactNode } from 'react';
 import { FONT_SIZE, LINE_HEIGHT } from '../core/measure';
 import { participantColors, type Theme } from '../core/themes';
 import type { FCluster, FEdge, FlowLayout, FNode, Pt } from '../flow/layout';
@@ -165,7 +165,8 @@ function Cluster({ c, t }: { c: FCluster; t: Theme }) {
   );
 }
 
-export function FlowContent({ layout, theme: t, background = true }: { layout: FlowLayout; theme: Theme; background?: boolean }) {
+// Memo: skips pan / zoom / drag renders
+export const FlowContent = memo(function FlowContent({ layout, theme: t, background = true }: { layout: FlowLayout; theme: Theme; background?: boolean }) {
   const b = layout.bounds;
   return (
     <g fontFamily={t.fontFamily}>
@@ -186,7 +187,7 @@ export function FlowContent({ layout, theme: t, background = true }: { layout: F
       ))}
     </g>
   );
-}
+});
 
 // Standalone SVG
 export function FlowSvg({ layout, theme, scale = 1, background = true }: { layout: FlowLayout; theme: Theme; scale?: number; background?: boolean }) {

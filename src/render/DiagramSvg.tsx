@@ -1,5 +1,5 @@
 // SVG renderer
-import type { ReactNode } from 'react';
+import { memo, type ReactNode } from 'react';
 import { selfPath, type LFrame, type LMessage, type LNote, type LParticipant, type Layout } from '../core/layout';
 import { FONT_SIZE, LINE_HEIGHT } from '../core/measure';
 import { participantColors, type Theme } from '../core/themes';
@@ -232,8 +232,8 @@ export function StatementShape({ layout, line, theme: t }: { layout: Layout; lin
   return f ? <Frame f={f} t={t} /> : null;
 }
 
-// Diagram content
-export function DiagramContent({ layout, theme: t, background = true }: { layout: Layout; theme: Theme; background?: boolean }) {
+// Diagram content (memo: skips pan / zoom / drag renders)
+export const DiagramContent = memo(function DiagramContent({ layout, theme: t, background = true }: { layout: Layout; theme: Theme; background?: boolean }) {
   const b = layout.bounds;
   const colorOf = (id: string) => participantColors(t, layout.participants.find((p) => p.id === id)?.index ?? 0);
   return (
@@ -288,7 +288,7 @@ export function DiagramContent({ layout, theme: t, background = true }: { layout
       ))}
     </g>
   );
-}
+});
 
 // Standalone SVG
 export function DiagramSvg({ layout, theme, scale = 1, background = true }: { layout: Layout; theme: Theme; scale?: number; background?: boolean }) {
