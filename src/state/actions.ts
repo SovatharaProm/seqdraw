@@ -22,6 +22,7 @@ import {
 import { isBlankDiagram, startCode } from '../core/diagram';
 import { analyze } from '../core/parser';
 import { addFlowItem, flowDelete, flowEditText, flowSetText, type FlowPaletteItem } from './flowActions';
+import { usePanel } from './panel';
 import { current as S, type EditTarget, type FlowSelection, type Selection } from './store';
 
 const cloneOverrides = (o: LayoutOverrides): LayoutOverrides => ({ ...o, participants: Object.fromEntries(Object.entries(o.participants).map(([k, v]) => [k, { ...v }])) });
@@ -38,7 +39,7 @@ const isFlow = (t: EditTarget | Selection): t is FlowSelection => t.kind === 'no
 export function editText(t: EditTarget): string {
   if (isFlow(t)) return flowEditText(t);
   const { doc } = S();
-  if (t.kind === 'participant') return doc.participants.find((p) => p.id === t.id)?.label ?? '';
+  if (t.kind === 'participant') return doc.participants.find((p) => p.id === t.id)?.label.trim() ?? '';
   const s = doc.lines[t.line]?.stmt;
   if (!s) return '';
   if (s.type === 'message' || s.type === 'note') return fromMermaidText(s.text);
@@ -48,11 +49,16 @@ export function editText(t: EditTarget): string {
 
 export function setText(t: EditTarget, text: string) {
   if (isFlow(t)) return flowSetText(t, text);
-  const { doc, overrides } = S();
+  const { doc, overrides, layout } = S();
   if (t.kind === 'participant') {
     const lines = renameParticipant(doc, t.id, text.replace(/\s*\n\s*/g, ' '));
     const after = analyze(lines);
     const ov = cloneOverrides(overrides);
+    // Keep the size unless fitting to text
+    const lp = layout.participants.find((p) => p.id === t.id);
+    const { width: _w, height: _h, ...rest } = ov.participants[t.id] ?? {};
+    if (usePanel.getState().fitText) ov.participants[t.id] = rest;
+    else if (lp) ov.participants[t.id] = { ...ov.participants[t.id], width: lp.width, height: lp.height };
     let id = t.id;
     if (!after.participants.some((p) => p.id === t.id)) {
       // Keep overrides on rename
@@ -164,25 +170,17 @@ export function moveDiagram(dx: number, dy: number) {
   S().setOverrides(ov);
 }
 
-export function resetParticipantPosition(id: string) {
+// Back to the label's size
+export function fitParticipant(id: string) {
   const ov = cloneOverrides(S().overrides);
-  const { width, height } = ov.participants[id] ?? {};
-  ov.participants[id] = {};
-  if (width !== undefined) ov.participants[id].width = width;
-  if (height !== undefined) ov.participants[id].height = height;
+  const { width: _w, height: _h, ...rest } = ov.participants[id] ?? {};
+  ov.participants[id] = rest;
   S().setOverrides(ov);
 }
 
 export function resizeParticipant(id: string, width: number, height: number) {
   const ov = cloneOverrides(S().overrides);
   ov.participants[id] = { ...ov.participants[id], width: Math.round(width), height: Math.round(height) };
-  S().setOverrides(ov);
-}
-
-export function resetParticipantSize(id: string) {
-  const ov = cloneOverrides(S().overrides);
-  const { width: _w, height: _h, ...rest } = ov.participants[id] ?? {};
-  ov.participants[id] = rest;
   S().setOverrides(ov);
 }
 

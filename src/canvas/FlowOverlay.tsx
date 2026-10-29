@@ -2,6 +2,7 @@
 import type { Theme } from '../core/themes';
 import { editableEdge, facingSide, midpoint, movedRoute, nodeAt, orthoRoute, portPoint, sideAt, sidePoint, SIDES, type FlowLayout, type FNode, type Pt } from '../flow/layout';
 import type { Side } from '../flow/model';
+import { isFreeEnd } from '../flow/shapes';
 import { edgePath, FlowNodeShape, linePath, roundedPath, smoothPath } from '../render/FlowSvg';
 import type { Selection } from '../state/store';
 
@@ -13,17 +14,34 @@ export type FlowDrag =
   // Drag one segment of a link's route
   | { type: 'flow-segment'; index: number; seg: number; pts: Pt[]; sides: [Side, Side]; axis: 'x' | 'y'; start: Pt; delta: number }
   // Move or add a bend
-  | { type: 'flow-bend'; index: number; bends: Pt[]; i: number; insert: boolean; at: Pt; moved: boolean };
+  | { type: 'flow-bend'; index: number; bends: Pt[]; i: number; insert: boolean; at: Pt; moved: boolean }
+  // Corner drag: `sx`/`sy` the corner's side
+  | { type: 'flow-resize'; id: string; start: Pt; sx: 1 | -1; sy: 1 | -1; from: Box; box: Box };
+
+type Box = { x: number; y: number; w: number; h: number };
 
 const none = { pointerEvents: 'none' as const };
+const CORNERS: [1 | -1, 1 | -1][] = [[-1, -1], [1, -1], [1, 1], [-1, 1]];
 const SNAP = 6;
 
 // Snap distance (screen px)
 const SPOT_SNAP = 6;
+// Link snaps this close to a node (screen px)
+const NODE_SNAP = 4;
+const MIN_W = 30;
+const MIN_H = 20;
+
+// Box after dragging a corner (opposite corner stays)
+export function resizedBox(d: { start: Pt; sx: 1 | -1; sy: 1 | -1; from: Box }, p: Pt): Box {
+  const { from: b, sx, sy } = d;
+  const w = Math.max(MIN_W, b.w + sx * (p.x - d.start.x));
+  const h = Math.max(MIN_H, b.h + sy * (p.y - d.start.y));
+  return { x: b.x - (sx * b.w) / 2 + (sx * w) / 2, y: b.y - (sy * b.h) / 2 + (sy * h) / 2, w, h };
+}
 
 // Side and spot under the pointer (snaps to the middle and to `toward`; `free`: no snap)
 export function snapTarget(layout: FlowLayout, p: Pt, k: number, opts: { toward?: Pt; free?: boolean } = {}): { node: FNode; side: Side; at: number; point: Pt } | null {
-  const node = nodeAt(layout, p, 14 / k);
+  const node = nodeAt(layout, p, NODE_SNAP / k);
   if (!node) return null;
   const side = facingSide(node, p);
   const snap = opts.free ? 0 : SPOT_SNAP / k;
@@ -151,7 +169,7 @@ export function FlowHandles({ node, k }: { node: FNode; k: number }) {
       {SIDES.map((side) => {
         const p = portPoint(node, side);
         return (
-          <Dot key={side} at={p} k={k} r={4.5} cursor="crosshair" tip="Drag to a side of another node to connect, or to empty space for a new node" data={{ handle: 'flow-connect', id: node.id, side, x: p.x, y: p.y }} />
+          <Dot key={side} at={p} k={k} r={4.5} cursor="crosshair" tip="Drag to a side of another node to connect, or to empty space for a loose arrow" data={{ handle: 'flow-connect', id: node.id, side, x: p.x, y: p.y }} />
         );
       })}
     </g>
@@ -179,7 +197,27 @@ export function FlowSelectionOverlay({ layout, selection, k }: { layout: FlowLay
   const style = { fill: 'none', stroke: 'var(--accent)', strokeWidth: sw, pointerEvents: 'none' as const };
   if (selection.kind === 'node') {
     const n = layout.nodes.find((q) => q.id === selection.id);
-    return n ? <rect x={n.x - n.width / 2 - pad} y={n.y - n.height / 2 - pad} width={n.width + pad * 2} height={n.height + pad * 2} rx={4} {...style} /> : null;
+    if (!n) return null;
+    const s = 9 / k;
+    const hit = 18 / k;
+    return (
+      <g>
+        <rect x={n.x - n.width / 2 - pad} y={n.y - n.height / 2 - pad} width={n.width + pad * 2} height={n.height + pad * 2} rx={4} {...style} />
+        {!isFreeEnd({ shape: n.shape, label: n.label.join('') }) &&
+          CORNERS.map(([sx, sy]) => {
+            const cx = n.x + sx * (n.width / 2 + pad);
+            const cy = n.y + sy * (n.height / 2 + pad);
+            return (
+              <g key={`${sx}${sy}`} data-handle="flow-resize" data-sx={sx} data-sy={sy} style={{ cursor: sx === sy ? 'nwse-resize' : 'nesw-resize' }}>
+                {/* Wider hit area */}
+                <rect x={cx - hit / 2} y={cy - hit / 2} width={hit} height={hit} fill="transparent" />
+                <rect x={cx - s / 2} y={cy - s / 2} width={s} height={s} rx={1.5 / k} fill="white" stroke="var(--accent)" strokeWidth={1.5 / k} />
+                <title>Drag to resize, double-click to fit the text</title>
+              </g>
+            );
+          })}
+      </g>
+    );
   }
   if (selection.kind === 'subgraph') {
     const c = layout.clusters.find((q) => q.id === selection.id);
@@ -232,6 +270,17 @@ export function FlowDragOverlay({ drag: d, layout, theme, k }: { drag: FlowDrag;
       </g>
     );
   }
+  if (d.type === 'flow-resize') {
+    const n = layout.nodes.find((q) => q.id === d.id);
+    if (!n) return null;
+    const b = d.box;
+    return (
+      <g style={none}>
+        <FlowNodeShape node={{ ...n, x: b.x, y: b.y, width: b.w, height: b.h }} theme={theme} />
+        <rect x={b.x - b.w / 2 - 4} y={b.y - b.h / 2 - 4} width={b.w + 8} height={b.h + 8} rx={4} fill="none" stroke={accent} strokeWidth={sw} strokeDasharray={dash} />
+      </g>
+    );
+  }
   if (d.type === 'flow-bend') {
     const e = layout.edges.find((q) => q.index === d.index);
     if (!e || !d.moved) return null;
@@ -267,9 +316,6 @@ export function FlowDragOverlay({ drag: d, layout, theme, k }: { drag: FlowDrag;
       {snap && <SnapDots node={snap.node} side={snap.side} point={snap.point} k={k} />}
       <path d={path} fill="none" stroke={accent} strokeWidth={sw} strokeDasharray={dash} />
       {!snap && <circle cx={to.x} cy={to.y} r={5 / k} fill={accent} />}
-      {!snap && d.type === 'flow-connect' && (
-        <rect x={d.to.x - 50} y={d.to.y - 20} width={100} height={40} rx={4} fill="var(--accent-soft)" stroke={accent} strokeWidth={1 / k} strokeDasharray={`${4 / k} ${4 / k}`} />
-      )}
     </g>
   );
 }

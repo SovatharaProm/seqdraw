@@ -75,7 +75,6 @@ function PaletteItemButton({ item, label, hint, wide, onPick, onDragging }: { it
       {wide && (
         <span className="palette-item-text">
           <b>{label}</b>
-          <small>{hint}</small>
         </span>
       )}
     </button>

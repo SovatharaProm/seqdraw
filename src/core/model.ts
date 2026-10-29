@@ -106,6 +106,8 @@ export interface LayoutOverrides {
   participants: Record<string, { width?: number; height?: number; gap?: number; x?: number; y?: number; stretch?: number }>;
   // Flowchart node positions (centers)
   nodes?: Record<string, { x: number; y: number }>;
+  // Flowchart hand-set node sizes
+  sizes?: Record<string, { w: number; h: number }>;
   // Flowchart links by edge key
   ports?: Record<string, { from?: NodeSide; to?: NodeSide; fromAt?: number; toAt?: number; route?: { x: number; y: number }[]; shape?: 'ortho' | 'straight' | 'curved'; points?: { x: number; y: number }[] }>;
 }

@@ -6,7 +6,7 @@ import { shapeOf } from '../core/participants';
 import type { FlowLayout } from '../flow/layout';
 import * as actions from '../state/actions';
 import { useStore, type EditTarget } from '../state/store';
-import { SELF_W, type View } from './types';
+import type { View } from './types';
 
 type Box = { x: number; y: number; w: number; h: number; multiline: boolean; bare?: boolean };
 
@@ -50,7 +50,7 @@ function editBox(layout: Layout, t: EditTarget, flow: FlowLayout | null): Box | 
   if (t.kind === 'message') {
     const m = layout.messages.find((q) => q.line === t.line);
     if (!m) return null;
-    const cx = m.self ? m.x1 + SELF_W / 2 : (m.x1 + m.x2) / 2;
+    const cx = (m.x1 + m.x2) / 2;
     const w = Math.max(160, Math.abs(m.x2 - m.x1) - 20);
     return { x: cx - w / 2, y: m.textY - 4, w, h: Math.max(28, m.text.length * LINE_HEIGHT + 8), multiline: true };
   }

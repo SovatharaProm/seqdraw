@@ -165,18 +165,18 @@ let fitOnElk = false;
 export const fitAfterLayout = () => (fitOnElk = true);
 
 function flowLayoutOf(flow: FlowDoc, overrides: LayoutOverrides, measure: Measure) {
-  const base = layoutFlow(flow, overrides.nodes ?? {}, measure, overrides.ports ?? {});
+  const base = layoutFlow(flow, overrides.nodes ?? {}, measure, overrides.ports ?? {}, undefined, overrides.sizes);
   if (engineOf(flow) !== 'elk') return base;
   const sig = layoutSignature(flow, base);
   const auto = elkCache.get(sig);
-  if (auto) return layoutFlow(flow, overrides.nodes ?? {}, measure, overrides.ports ?? {}, auto);
+  if (auto) return layoutFlow(flow, overrides.nodes ?? {}, measure, overrides.ports ?? {}, auto, overrides.sizes);
   // Dagre now, ELK when ready
   elkLayout(flow, base).then((result) => {
     elkCache.set(sig, result);
     if (elkCache.size > ELK_CACHE_MAX) elkCache.delete(elkCache.keys().next().value!);
     const s = useStore.getState();
     if (!s.flow || s.flowLayout !== base) return;
-    useStore.setState({ flowLayout: layoutFlow(s.flow, s.overrides.nodes ?? {}, measure, s.overrides.ports ?? {}, result) });
+    useStore.setState({ flowLayout: layoutFlow(s.flow, s.overrides.nodes ?? {}, measure, s.overrides.ports ?? {}, result, s.overrides.sizes) });
     if (fitOnElk) (fitOnElk = false), requestAnimationFrame(requestFit);
   });
   return base;

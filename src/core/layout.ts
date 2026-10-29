@@ -9,6 +9,7 @@ const SELF_W = 40;
 const ACT_W = 10;
 const MARGIN = 24;
 const MIN_LIFELINE = 20;
+const FRAME_PAD = 16;
 
 export interface LParticipant {
   id: string;
@@ -112,7 +113,7 @@ export function layoutDiagram(doc: Doc, overrides: LayoutOverrides, measure: Mea
       const w = textBlockWidth(splitLines(s.text), measure);
       const a = idx.get(s.from)!;
       const b = idx.get(s.to)!;
-      if (a === b) requireRight(a, Math.max(w + 20, SELF_W + 20));
+      if (a === b) (requireRight(a, Math.max(w / 2 + 20, SELF_W + 20)), requireLeft(a, w / 2 + 20));
       else requireSpan(a, b, w + 40);
     } else if (s.type === 'note') {
       const w = noteWidth(splitLines(s.text), measure);
@@ -178,9 +179,17 @@ export function layoutDiagram(doc: Doc, overrides: LayoutOverrides, measure: Mea
     const y2 = Math.max(y, y1 + 50);
     let { minX, maxX } = f;
     if (minX === Infinity) [minX, maxX] = [centers[0] ?? 0, centers[centers.length - 1] ?? 0];
-    const labelW = measure(`${f.kind} ${f.label}`) + 40;
-    const x1 = minX - 24;
-    const x2 = Math.max(maxX + 24, x1 + labelW);
+    // Header and section labels fit
+    const tabW = Math.max(46, f.kind.length * 8 + 20);
+    const headW = f.kind === 'rect' ? 0 : tabW * 2 + (f.label ? measure(`[${f.label}]`) : 0) + 16;
+    const needW = Math.max(headW, ...f.sections.map((q) => measure(`[${q.label}]`) + 32));
+    let x1 = minX - FRAME_PAD;
+    let x2 = maxX + FRAME_PAD;
+    if (x2 - x1 < needW) {
+      const grow = (needW - (x2 - x1)) / 2;
+      x1 -= grow;
+      x2 += grow;
+    }
     frames.push({ line: f.line, endLine, kind: f.kind, label: f.label, x1, x2, y1, y2, sections: f.sections });
     y = y2 + 14;
     extend(x1, x2);
@@ -208,7 +217,10 @@ export function layoutDiagram(doc: Doc, overrides: LayoutOverrides, measure: Mea
         if (numbering) numbering.n += numbering.step;
         lastArrowY = y;
         if (s.activation === '-') deactivate(s.from, y + (self ? 28 : 0));
-        extend(Math.min(x1, x2), Math.max(x1, x2) + (self ? SELF_W : 0));
+        // Arrow and label extent
+        const mid = (x1 + x2) / 2;
+        const half = textBlockWidth(text, measure) / 2;
+        extend(Math.min(x1, x2, mid - half), Math.max(Math.max(x1, x2) + (self ? SELF_W : 0), mid + half));
         y += self ? 28 + 22 : 22;
         break;
       }
@@ -239,13 +251,13 @@ export function layoutDiagram(doc: Doc, overrides: LayoutOverrides, measure: Mea
         break;
       case 'block':
         open.push({ line, endLine: -1, kind: s.kind, label: s.label, x1: 0, x2: 0, y1: y, y2: 0, sections: [], minX: Infinity, maxX: -Infinity });
-        y += 34;
+        y += 40;
         break;
       case 'branch': {
         const f = open[open.length - 1];
         if (f) {
-          f.sections.push({ line, y: y + 4, label: s.label });
-          y += 30;
+          f.sections.push({ line, y: y + 6, label: s.label });
+          y += 38;
         }
         break;
       }
@@ -282,7 +294,7 @@ export function layoutDiagram(doc: Doc, overrides: LayoutOverrides, measure: Mea
   messages.forEach((m) => {
     grow(Math.min(m.x1, m.x2) - 10, Math.max(m.x1, m.x2) + (m.self ? SELF_W + 10 : 10));
     // Label extent
-    const mid = m.self ? m.x1 + SELF_W / 2 : (m.x1 + m.x2) / 2;
+    const mid = (m.x1 + m.x2) / 2;
     const half = textBlockWidth(m.text, measure) / 2 + 10;
     grow(mid - half, mid + half);
   });
